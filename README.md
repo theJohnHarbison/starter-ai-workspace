@@ -1,6 +1,6 @@
 # AI Workspace
 
-An AI-assisted development workspace with semantic session memory, designed for Claude Code.
+An AI-assisted development workspace with semantic session memory, designed for Claude Code. This is the starter kit for your future workspace. While there are some included skills you will need to customize this workspace for your needs.
 
 ## Quick Setup
 
