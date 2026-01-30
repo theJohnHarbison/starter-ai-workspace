@@ -1,0 +1,52 @@
+{
+  "name": "ai-workspace",
+  "version": "1.0.0",
+  "description": "AI-first workspace with session search and semantic memory",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "setup:models": "node scripts/setup-models.js",
+    "session:embed": "cd scripts/session-embedder && ts-node index.ts embed",
+    "session:search": "cd scripts/session-embedder && ts-node search.ts",
+    "session:stats": "cd scripts/session-embedder && ts-node index.ts stats",
+    "tiered:search": "cd scripts/session-embedder && ts-node tiered-search.ts",
+    "tiered:stats": "cd scripts/session-embedder && ts-node -e \"const { TieredMemoryManager } = require('./tiered-memory'); const m = new TieredMemoryManager(); console.log(JSON.stringify(m.getStats(), null, 2));\"",
+    "tiered:maintenance": "cd scripts/session-embedder && ts-node -e \"const { TieredMemoryManager } = require('./tiered-memory'); const m = new TieredMemoryManager(); console.log(m.runMaintenance());\"",
+    "hybrid:search": "cd scripts/session-embedder && ts-node hybrid-search.ts",
+    "hybrid:stats": "cd scripts/session-embedder && ts-node hybrid-search.ts --stats",
+    "session:visualize": "cd scripts/session-embedder && ts-node visualize.ts",
+    "session:topics": "cd scripts/session-embedder && ts-node topic-map.ts",
+    "list-scripts": "node scripts/list-scripts",
+    "hook:session-start": "node .claude/hooks/knowledge-capture/scripts/session-start.js",
+    "hook:session-end": "node .claude/hooks/knowledge-capture/scripts/session-end.js",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "session-search": "./scripts/session-embedder/search.ts"
+  },
+  "keywords": [
+    "semantic-search",
+    "session-embeddings",
+    "ai-workspace",
+    "claude-code",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^11.0.0",
+    "fs-extra": "^11.2.0",
+    "gray-matter": "^4.0.3",
+    "umap-js": "^1.4.0",
+    "yaml": "^2.3.4"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.11.0",
+    "nodemon": "^3.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

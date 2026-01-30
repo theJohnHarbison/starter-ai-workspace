@@ -1,0 +1,75 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# MCP Configuration (with tokens - never commit!)
+.mcp.json
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.iml
+*.sublime-workspace
+.sublime-project
+
+# Local configuration
+.claude/settings.local.json
+
+# Installed community skills (reinstall via scripts/install-skills.sh)
+.claude/skills/.installed/
+!.claude/skills/.installed/.gitkeep
+
+# Knowledge capture logs (may contain sensitive information)
+.claude/logs/
+!.claude/logs/README.md
+.claude.backup/
+
+# Generated visualizations (regenerated via npm run session:embed)
+.claude/visualizations/
+
+# Workspace specific (local only)
+agent/_projects/*
+agent/_examples/*
+agent/_tasks/*
+!agent/_projects/.gitkeep
+!agent/_examples/.gitkeep
+!agent/_tasks/.gitkeep
+!agent/_tasks/README.md
+
+# Node modules (all locations)
+node_modules/
+**/node_modules/
+
+# Build artifacts
+*.js.map
+*.d.ts
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+nul
+backups/
+
+# https://skills.sh/
+.agents/
+.claude/skills/better-auth-best-practices/
+.claude/skills/expo-cicd-workflows/
+.claude/skills/expo-dev-client/
+.claude/skills/upgrading-expo/
+.claude/skills/vercel-react-best-practices/
+.claude/skills/web-design-guidelines/

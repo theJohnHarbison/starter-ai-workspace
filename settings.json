@@ -1,0 +1,30 @@
+{
+  "workspace": {
+    "name": "ai-workspace",
+    "description": "AI-assisted development workspace with session memory and workspace tools",
+    "type": "development"
+  },
+  "tools": {
+    "workspace_scripts": {
+      "list_projects": "./scripts/list-projects",
+      "add_project": "./scripts/add-project",
+      "add_example": "./scripts/add-example"
+    },
+    "claude_commands": {
+      "enabled": true,
+      "path": "./.claude/commands",
+      "description": "Workspace commands available as Claude Code tools"
+    }
+  },
+  "alwaysThinkingEnabled": true,
+  "metadata": {
+    "projects": [],
+    "guides": {
+      "workspace": "./README.md",
+      "claude_instructions": "./CLAUDE.md"
+    }
+  },
+  "environment": {
+    "workspace_tools_enabled": true
+  }
+}

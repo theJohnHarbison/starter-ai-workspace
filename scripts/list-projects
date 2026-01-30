@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# list-projects - List all projects in the workspace
+# Compatible with Linux and macOS
+
+set -e
+
+# Get the workspace root directory (handle symlinks)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECTS_DIR="$WORKSPACE_ROOT/agent/_projects"
+
+# Check if projects directory exists
+if [ ! -d "$PROJECTS_DIR" ]; then
+    echo "No projects directory found at: $PROJECTS_DIR"
+    exit 1
+fi
+
+# List projects
+echo "Projects in workspace:"
+echo "====================="
+
+if [ -z "$(ls -A "$PROJECTS_DIR" 2>/dev/null)" ]; then
+    echo "No projects found."
+    exit 0
+fi
+
+# List each project with details
+for project in "$PROJECTS_DIR"/*; do
+    if [ -d "$project" ]; then
+        project_name=$(basename "$project")
+        echo "📁 $project_name"
+        
+        # Check for README or description
+        if [ -f "$project/README.md" ]; then
+            echo "   📖 $(head -n 1 "$project/README.md" | sed 's/^# *//')"
+        elif [ -f "$project/description.txt" ]; then
+            echo "   📖 $(cat "$project/description.txt")"
+        fi
+        
+        # Check if it's a git repository
+        if [ -d "$project/.git" ]; then
+            cd "$project"
+            remote_url=$(git remote get-url origin 2>/dev/null || echo "No remote")
+            echo "   🔗 $remote_url"
+            cd - > /dev/null
+        fi
+        
+        echo ""
+    fi
+done

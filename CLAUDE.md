@@ -1,0 +1,466 @@
+# WHO YOU ARE
+-------------------
+- You take on a role based on skills loaded from `.claude/skills/`
+- You always prefer to use MCP over local filesystem
+- You respect workspace structure and security protocols
+
+# FIRST-TIME SETUP (After Git Clone)
+-------------------
+
+## 🚀 Quick Setup (New Users)
+
+For complete step-by-step instructions, see **[README.md](README.md)**.
+
+### Essential Setup Commands
+
+```bash
+# 1. Install Node.js dependencies
+npm install
+
+# 2. Start Docker services (Ollama + Qdrant)
+docker-compose up -d
+
+# 3. Pull required models
+npm run setup:models
+
+# 4. Verify everything is working
+npm run session:stats
+```
+
+### Verify Setup Success
+
+```bash
+docker-compose ps           # Shows ollama and qdrant as "Up"
+npm run session:stats       # Shows vector store statistics
+```
+
+### Infrastructure Services
+
+This workspace requires and automatically starts:
+
+| Service | Purpose | URL | Port |
+|---------|---------|-----|------|
+| **Ollama** | Local LLM (`qwen2.5-coder:7b`) and embeddings (`nomic-embed-text`) | http://localhost:11434 | 11434 |
+| **Qdrant** | Vector database for session embeddings | http://localhost:6333 | 6333 |
+
+Start/stop all services with:
+```bash
+docker-compose up -d      # Start all services
+docker-compose down       # Stop all services
+docker-compose logs -f    # View service logs
+```
+
+**Session hooks will validate the environment on startup** and warn if anything is missing.
+
+# WORKSPACE GUIDANCE
+-------------------
+You are working in a structured workspace with specialized tools and skills designed for collaborative development. See `README.md` and `docs/` for comprehensive guidance.
+
+**Important**: Skills are auto-loaded from `.claude/skills/` based on context.
+
+**Important**: Use the local Ollama model (`qwen2.5-coder:7b`) for token-efficient code analysis and generation. See **[docs/OLLAMA_WORKFLOW.md](docs/OLLAMA_WORKFLOW.md)** for when to use local vs Claude.
+
+## Security & Configuration
+- **`.mcp.json`**: Contains authentication tokens - NEVER commit to git
+  - Live on your machine only, protected by `.gitignore`
+  - Copy from `.mcp.json.example` and add your tokens
+  - Git pre-commit hook prevents accidental commits
+- **Pre-commit hook**: Automatically checks for protected files before committing
+
+## Workspace Tools
+Use these powerful workspace tools to enhance your capabilities:
+
+**Project Management:**
+- **list-projects**: View available projects (`scripts/list-projects`)
+- **add-project**: Add new projects (`scripts/add-project`)
+- **add-example**: Add examples for reference (`scripts/add-example`)
+- **install-skills**: Install community skills (`/install-skills`)
+- **list-scripts**: Discover all workspace scripts (`npm run list-scripts`)
+
+**Development Commands:**
+- **/commit**: Create conventional commits with proper formatting
+- **/debug**: Systematic debugging with 4-phase root cause analysis
+- **/pr-review**: Comprehensive pull request review
+
+**Session Memory & Search:**
+- **session:search**: Search past sessions semantically (`npm run session:search "query"`)
+- **hybrid:search**: Semantic + entity search (`npm run hybrid:search "query"`)
+- **tiered:search**: Memory-tier aware search (`npm run tiered:search "query"`)
+- **session:stats**: View embedding statistics (`npm run session:stats`)
+
+**Task Management:**
+- **Create tasks**: Add tasks to `agent/_tasks/<project>/` as markdown files (see structure below)
+
+## Session Memory System
+**IMPORTANT**: This workspace embeds all Claude Code sessions for semantic search. Use it to find past solutions and context.
+
+```bash
+# Search past sessions semantically
+npm run session:search "authentication error handling"
+
+# Hybrid search (semantic + entity extraction)
+npm run hybrid:search "database migration patterns"
+
+# Tiered search (recent sessions weighted higher)
+npm run tiered:search "React component architecture"
+
+# View embedding statistics
+npm run session:stats
+```
+
+### When to Search Session Memory
+**Always search session memory when:**
+1. Starting work on a feature you've touched before
+2. Troubleshooting issues you may have solved previously
+3. Looking for patterns or code examples from past work
+4. Trying to remember decisions made in earlier sessions
+
+### Example Workflow
+```bash
+# Before implementing a feature:
+npm run hybrid:search "similar feature implementation"
+
+# Before debugging an issue:
+npm run session:search "error message or symptom"
+
+# Finding past architectural decisions:
+npm run tiered:search "architecture decision for X"
+```
+
+Sessions are automatically embedded when you run `npm run session:embed`.
+
+## Problem-Solving Approach (OODA Loop)
+
+Follow this approach for EVERY non-trivial task:
+
+### 1. OBSERVE - Understand the situation
+- Read the user's request carefully
+- Identify what files, systems, or contexts are involved
+- Note any constraints or requirements mentioned
+
+### 2. ORIENT - Consult session memory before acting ⚠️ CRITICAL
+**You MUST search session memory before starting work:**
+
+```bash
+# Search session memory for relevant past work
+npm run hybrid:search "your topic or keywords"
+
+# Tiered search (weights recent sessions higher)
+npm run tiered:search "your topic"
+
+# Basic semantic search
+npm run session:search "specific terms"
+```
+
+**Why this matters:**
+- Avoid repeating work already done in past sessions
+- Find patterns and solutions that worked before
+- Understand decisions and context from previous work
+- Build on existing knowledge instead of starting fresh
+
+**Skip session search ONLY if:**
+- Task is trivial (fix a typo, add a simple log)
+- User explicitly says "don't look anything up"
+- You're continuing work from earlier in the same session
+
+### 3. DECIDE - Choose the best approach
+- Consider what the knowledge search revealed
+- Select appropriate tools and workspace capabilities
+- Plan the implementation (use TodoWrite for complex tasks)
+- Ask clarifying questions if approach is unclear
+
+### 4. ACT - Execute with small, focused steps
+- Make incremental changes
+- Verify each step works before proceeding
+- Re-evaluate if something unexpected happens
+- Commit after completing logical units of work
+
+## Working Principles
+- Prefer small, incremental changes over large modifications
+- Edit existing files rather than creating new ones unless necessary
+- Use workspace tools to enhance your understanding and capabilities
+- Re-evaluate after each action to ensure you're on the right track
+
+## Git Commit Strategy
+
+**COMMIT AFTER EACH UNIT OF WORK** - This keeps history clean and changes atomic.
+
+### When to Commit
+- ✅ After completing a feature or task
+- ✅ After fixing a bug
+- ✅ After updating documentation
+- ✅ After refactoring code
+- ✅ After adding tests
+- ❌ DON'T commit partial/incomplete work
+- ❌ DON'T commit unrelated changes together
+
+### Commit Message Format
+```
+<type>: <subject>
+
+<body (optional)>
+
+🤖 Generated with Claude Code
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+**Types**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`
+
+### Multi-Project Workflow
+1. **Work on one project at a time** - Focus on complete units
+2. **Commit in that project** - Keep changes isolated
+3. **Verify all repos are clean** - Before moving to next unit
+   ```bash
+   # Check status in each project
+   git status
+   ```
+
+### Before Session End
+- ✅ Verify all changes are committed in all repos
+- ✅ Run `git status` in each repository
+- ✅ No uncommitted files should remain
+
+## Workspace Directory Structure
+
+```
+ai-workspace/
+├── .git/                           # Git repository
+│   └── hooks/pre-commit            # Security hook
+├── .claude/
+│   ├── commands/                   # Slash commands (/commit, /debug, etc.)
+│   ├── hooks/                      # Workspace hooks
+│   │   └── scripts/                # Hook implementations
+│   ├── logs/                       # Session logs
+│   │   └── sessions/               # Exported session JSON files
+│   ├── skills/                     # Claude Code skills (auto-detected)
+│   │   ├── <skill-name>/           # Each skill in its own directory
+│   │   │   ├── SKILL.md            # Main skill file (required)
+│   │   │   └── patterns.md         # Additional reference (optional)
+│   │   └── .installed/             # Community skills (gitignored)
+│   ├── vector-store/               # Session embeddings (legacy, now uses Qdrant)
+│   └── services/                   # Service state tracking
+├── .mcp.json (LOCAL - gitignored)  # Your tokens - NEVER commit
+├── .mcp.json.example               # Template for setup
+├── agent/
+│   ├── _projects/                  # Project symlinks
+│   │   └── [project-name]/         # Linked project directories
+│   ├── _examples/                  # Reference examples
+│   └── _tasks/                     # Project task tracking
+│       └── [project-name]/         # Tasks for specific projects
+├── docs/                           # Essential reference docs ONLY
+│   ├── OLLAMA_WORKFLOW.md          # Local LLM usage guide
+│   └── projects/<project>/         # Project-specific docs
+├── extensions/                     # MCP server configurations
+├── scripts/
+│   ├── install-skills.sh           # Install community skills
+│   ├── session-embedder/           # Session embedding system
+│   └── [other scripts]
+└── README.md                       # Main workspace guide
+```
+
+**Key Design Principles:**
+- Skills provide procedural expertise, auto-loaded from `.claude/skills/`
+- Custom skills are git-tracked; community skills are installed via script
+- Session memory via embeddings captures institutional knowledge
+- Tasks are tracked as markdown files in `agent/_tasks/<project>/`
+
+### Task System
+
+Tasks are stored as **markdown files** in `agent/_tasks/<project>/`. This keeps them tracked in git and accessible without external tools.
+
+**Task File Format**:
+```markdown
+# Task: [Title]
+
+**Status**: Not Started | In Progress | Completed
+**Priority**: High | Medium | Low
+**Estimated Effort**: [duration]
+**Dependencies**: [what this depends on]
+
+---
+
+## Goal
+[What needs to be done]
+
+---
+
+## Problem/Context
+[Why this matters, current situation]
+
+---
+
+## Implementation Approach
+[How to solve it, options if applicable]
+
+---
+
+## Steps
+[Detailed steps to complete]
+
+---
+
+## Validation
+[How to verify it's complete]
+
+---
+
+## References
+[Related files, docs, links]
+
+---
+
+**Created**: [date]
+**Type**: [Bug Fix | Enhancement | Research | etc]
+**Effort**: [Low | Medium | High]
+**Value**: [Impact assessment]
+```
+
+**Example Projects**:
+- `agent/_tasks/ai-workspace/` - Workspace infrastructure tasks
+- `agent/_tasks/<project-name>/` - Project-specific tasks
+
+### Essential File Paths (Reference Only)
+
+**IMPORTANT**: These paths are for reference. You should NOT create files here unless explicitly requested by user or for rare essential documentation.
+
+- **Session embeddings**: Qdrant vector database at `localhost:6333` (managed automatically)
+- **Session exports**: `.claude/logs/sessions/*.json` (auto-generated)
+- **Skills**: `.claude/skills/<skill>/SKILL.md` (auto-loaded by context)
+- **Project tasks**: `agent/_tasks/<project>/*.md` (task tracking)
+- **Essential docs**: `docs/*.md` (setup guides, config examples only)
+- **Project docs**: `docs/projects/<project>/*.md` (schemas, API docs only)
+
+## Session Memory System
+
+The workspace uses an **embedding-based session memory** system with Qdrant vector database. All Claude Code sessions are automatically embedded for semantic search.
+
+### How It Works
+
+1. **Session Export**: Claude Code exports session JSON to `.claude/logs/sessions/`
+2. **Embedding**: Sessions are chunked and embedded using Ollama's `nomic-embed-text` model
+3. **Storage**: Vectors stored in Qdrant vector database
+4. **Search**: Multiple search modes available for different use cases
+
+### Search Modes
+
+| Mode | Command | Best For |
+|------|---------|----------|
+| **Semantic** | `npm run session:search "query"` | General searches, concepts |
+| **Hybrid** | `npm run hybrid:search "query"` | Semantic + entity extraction |
+| **Tiered** | `npm run tiered:search "query"` | Recency-weighted results |
+
+### Embedding New Sessions
+
+```bash
+# Embed all sessions (skips already-embedded)
+npm run session:embed
+
+# Check embedding statistics
+npm run session:stats
+```
+
+### `docs/` Folder: Human-Focused Documentation
+
+**Purpose**: Human-readable guides and project-specific references
+
+**Contains**:
+- `OLLAMA_WORKFLOW.md` - When to use local LLM vs Claude
+- `projects/<project>/` - Project-specific documentation
+
+**How to Use**:
+- Read `OLLAMA_WORKFLOW.md` for local LLM guidance
+- Check project docs for schemas, API references, deployment configs
+
+### When to Create Files (Rare Exceptions)
+
+**Project-Specific Technical Docs** (Keep in `docs/projects/<project>/`):
+- ✅ Database schemas
+- ✅ API endpoint documentation
+- ✅ Deployment configurations
+
+**NEVER Create:**
+- ❌ Session summaries (already in embeddings)
+- ❌ Knowledge documentation (search sessions instead)
+- ❌ Conceptual guides (explain in conversation, let sessions capture it)
+
+## Code Quality Enforcement
+
+Workspace hooks enforce code quality and security standards:
+
+| Hook | Type | Trigger | Action |
+|------|------|---------|--------|
+| `block-as-any` | **Block** | `as any` casts | Prevents type system escape |
+| `block-hardcoded-secrets` | **Block** | API keys, passwords in code | Prevents secret commits |
+| `warn-any-type` | Warn | `: any`, `<any>`, `any[]` | Suggests specific types |
+| `warn-debug-code` | Warn | `console.log`, `debugger` | Reminds to remove debug code |
+| `warn-foreach` | Warn | `.forEach()` calls | Suggests `for...of` |
+| `warn-interface-prefix` | Warn | `interface IFoo` | Suggests modern naming |
+
+Hooks are configured in `.claude/hooks/` and travel with the workspace repo.
+
+## Before You Start
+
+**IMPORTANT**: This workspace uses a **session memory approach**:
+- **DO NOT create documentation files** unless essential
+- Session conversations are automatically embedded for search
+- Search past sessions for context: `npm run hybrid:search "topic"`
+- Share information through conversation, not files
+
+Read the relevant reference docs in `.claude/reference/` when needed:
+
+| File | When to Read |
+|------|--------------|
+| `coding-patterns.md` | Writing new code (TypeScript, general patterns) |
+| `anti-patterns.md` | Before code review or PR (AI-generated issues) |
+| `error-handling.md` | Implementing error handling |
+| `testing-patterns.md` | Writing or refactoring tests |
+| `bug-investigation.md` | Debugging complex issues |
+
+These are not automatically loaded - reference them when you need deep expertise.
+
+### Session Memory Quick Reference
+
+**Search Past Sessions**:
+```bash
+# Semantic search
+npm run session:search "error handling patterns"
+
+# Hybrid search (semantic + entities)
+npm run hybrid:search "React authentication"
+
+# Tiered search (recent sessions weighted higher)
+npm run tiered:search "database migrations"
+```
+
+**Manage Embeddings**:
+```bash
+# Embed new sessions
+npm run session:embed
+
+# View statistics
+npm run session:stats
+
+# Tiered memory maintenance
+npm run tiered:maintenance
+```
+
+## Configuration
+
+Settings are organized by scope:
+
+- **Workspace** (`.claude/settings.json`) - Team-shared defaults (committed to git)
+  - Extended thinking configuration
+  - Hook configurations
+  - Plugin settings
+  - Workspace permissions
+
+- **User** (`.claude/settings.local.json`) - Your personal overrides (gitignored)
+  - Personal thinking token limits
+  - Developer-specific tweaks
+  - Local environment preferences
+
+- **Optional Global** (`~/.claude/settings.json`) - Cross-project preferences (optional)
+  - Personal preferences that apply to ALL projects
+  - Not required for ai-workspace to function
+  - Only create if you need cross-project settings

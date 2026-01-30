@@ -1,0 +1,225 @@
+#!/bin/bash
+
+# add-project - Add a project from GitHub URL or local path
+# Compatible with Linux, macOS, and Windows (Git Bash)
+
+set -e
+
+# Get the workspace root directory (handle symlinks)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECTS_DIR="$WORKSPACE_ROOT/agent/_projects"
+
+# Function to show usage
+usage() {
+    echo "Usage: $0 [--copy] <github_url_or_path> [project_name]"
+    echo ""
+    echo "Add a project to the workspace from GitHub URL or local path."
+    echo "Local directories are symlinked by default for live development."
+    echo ""
+    echo "Options:"
+    echo "  --copy              Copy files instead of symlinking (local paths only)"
+    echo ""
+    echo "Arguments:"
+    echo "  github_url_or_path  GitHub URL or local directory path"
+    echo "  project_name        Optional name for the project (defaults to repo name)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 https://github.com/user/repo"
+    echo "  $0 git@github.com:user/repo.git my-project"
+    echo "  $0 /path/to/local/project                    # Creates symlink"
+    echo "  $0 --copy /path/to/local/project copied-project"
+    exit 1
+}
+
+# Check if git is available
+check_git() {
+    if ! command -v git &> /dev/null; then
+        echo "Error: git is required but not installed"
+        exit 1
+    fi
+}
+
+# Extract repository name from URL
+extract_repo_name() {
+    local url="$1"
+    # Remove .git suffix if present
+    url="${url%.git}"
+    # Extract last part of path
+    basename "$url"
+}
+
+# Parse arguments
+USE_COPY=false
+if [ "$1" = "--copy" ]; then
+    USE_COPY=true
+    shift
+fi
+
+# Check arguments
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    usage
+fi
+
+SOURCE="$1"
+PROJECT_NAME="$2"
+
+# Create projects directory if it doesn't exist
+mkdir -p "$PROJECTS_DIR"
+
+# Determine if source is URL or local path
+if [[ "$SOURCE" =~ ^https?:// ]] || [[ "$SOURCE" =~ ^git@ ]]; then
+    # GitHub URL
+    check_git
+    
+    if [ -z "$PROJECT_NAME" ]; then
+        PROJECT_NAME=$(extract_repo_name "$SOURCE")
+    fi
+    
+    DEST_PATH="$PROJECTS_DIR/$PROJECT_NAME"
+    
+    # Check if destination already exists
+    if [ -d "$DEST_PATH" ]; then
+        echo "Project '$PROJECT_NAME' already exists. Overwrite? (y/N)"
+        read -r response
+        if [ "$response" != "y" ] && [ "$response" != "Y" ]; then
+            echo "Cancelled."
+            exit 0
+        fi
+        rm -rf "$DEST_PATH"
+    fi
+    
+    echo "Cloning repository: $SOURCE"
+    git clone "$SOURCE" "$DEST_PATH"
+    
+    # Create project metadata
+    cd "$DEST_PATH"
+    REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "$SOURCE")
+    LAST_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    cd - > /dev/null
+    
+    cat > "$DEST_PATH/.project-meta" << EOF
+{
+  "source_type": "git",
+  "source_url": "$SOURCE",
+  "remote_url": "$REMOTE_URL",
+  "last_commit": "$LAST_COMMIT",
+  "added_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "added_by": "$(whoami)"
+}
+EOF
+    
+    echo "✅ Successfully cloned project: $PROJECT_NAME"
+    echo "   Source: $SOURCE"
+    echo "   Destination: $DEST_PATH"
+
+elif [ -d "$SOURCE" ]; then
+    # Local directory
+    if [ -z "$PROJECT_NAME" ]; then
+        PROJECT_NAME=$(basename "$SOURCE")
+    fi
+    
+    DEST_PATH="$PROJECTS_DIR/$PROJECT_NAME"
+    
+    # Check if destination already exists
+    if [ -e "$DEST_PATH" ]; then
+        echo "Project '$PROJECT_NAME' already exists. Overwrite? (y/N)"
+        read -r response
+        if [ "$response" != "y" ] && [ "$response" != "Y" ]; then
+            echo "Cancelled."
+            exit 0
+        fi
+        rm -rf "$DEST_PATH"
+    fi
+    
+    # Convert to absolute path
+    SOURCE_ABS=$(realpath "$SOURCE")
+    
+    if [ "$USE_COPY" = true ]; then
+        echo "Copying local directory: $SOURCE -> $DEST_PATH"
+        cp -r "$SOURCE" "$DEST_PATH"
+        OPERATION_TYPE="copy"
+        OPERATION_MSG="✅ Successfully copied project: $PROJECT_NAME"
+    else
+        echo "Creating link: $SOURCE_ABS -> $DEST_PATH"
+        # On Windows, use mklink /J (junction) since ln -s copies files instead
+        if [[ "$(uname -s)" =~ MINGW|MSYS|CYGWIN ]] || [ "$OS" = "Windows_NT" ]; then
+            # Convert Git Bash paths to Windows paths for mklink
+            WIN_DEST=$(cygpath -w "$DEST_PATH")
+            WIN_SRC=$(cygpath -w "$SOURCE_ABS")
+            cmd //c "mklink /J \"$WIN_DEST\" \"$WIN_SRC\"" > /dev/null
+        else
+            ln -s "$SOURCE_ABS" "$DEST_PATH"
+        fi
+        OPERATION_TYPE="symlink"
+        OPERATION_MSG="✅ Successfully linked project: $PROJECT_NAME"
+    fi
+    
+    # Create project metadata
+    REMOTE_URL="none"
+    if [ -d "$SOURCE/.git" ]; then
+        cd "$SOURCE"
+        REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "local git repo")
+        cd - > /dev/null
+    fi
+    
+    # For symlinks, store metadata in projects directory, not in the linked directory
+    if [ "$USE_COPY" = true ]; then
+        METADATA_PATH="$DEST_PATH/.project-meta"
+    else
+        METADATA_PATH="$PROJECTS_DIR/.${PROJECT_NAME}.project-meta"
+    fi
+    
+    cat > "$METADATA_PATH" << EOF
+{
+  "source_type": "local",
+  "source_path": "$SOURCE_ABS",
+  "operation_type": "$OPERATION_TYPE",
+  "remote_url": "$REMOTE_URL",
+  "added_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "added_by": "$(whoami)"
+}
+EOF
+    
+    echo "$OPERATION_MSG"
+    echo "   Source: $SOURCE_ABS"
+    echo "   Destination: $DEST_PATH"
+
+else
+    echo "Error: Source must be a GitHub URL or existing local directory"
+    echo "Given: $SOURCE"
+    if [ "$USE_COPY" = true ]; then
+        echo "Note: --copy option is only available for local directories"
+    fi
+    exit 1
+fi
+
+# Show project info
+echo ""
+echo "Project Information:"
+echo "==================="
+if [ -f "$DEST_PATH/README.md" ]; then
+    echo "📖 $(head -n 1 "$DEST_PATH/README.md" | sed 's/^# *//')"
+fi
+
+if [ -f "$DEST_PATH/package.json" ]; then
+    echo "📦 Node.js project detected"
+fi
+
+if [ -f "$DEST_PATH/Cargo.toml" ]; then
+    echo "🦀 Rust project detected"
+fi
+
+if [ -f "$DEST_PATH/setup.py" ] || [ -f "$DEST_PATH/pyproject.toml" ]; then
+    echo "🐍 Python project detected"
+fi
+
+# List current projects
+echo ""
+echo "Current projects:"
+ls -la "$PROJECTS_DIR" | tail -n +2 | while read -r line; do
+    name=$(echo "$line" | awk '{print $NF}')
+    if [ "$name" != "." ] && [ "$name" != ".." ] && [ -d "$PROJECTS_DIR/$name" ]; then
+        echo "  📁 $name"
+    fi
+done

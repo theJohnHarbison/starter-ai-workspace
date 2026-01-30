@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+/**
+ * List Scripts - Discover available workspace scripts
+ *
+ * Shows all available scripts with descriptions and usage.
+ *
+ * Usage:
+ *   ./scripts/list-scripts
+ *   ./scripts/list-scripts --category search
+ *   ./scripts/list-scripts --json
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const SCRIPTS = [
+  // Setup tools
+  {
+    name: 'setup:models',
+    category: 'setup',
+    description: 'Pull required Ollama models (nomic-embed-text, qwen2.5-coder:7b)',
+    usage: 'npm run setup:models',
+    examples: [],
+  },
+
+  // Core workspace tools
+  {
+    name: 'list-scripts',
+    category: 'workspace',
+    description: 'Discover available workspace scripts (this tool)',
+    usage: 'npm run list-scripts',
+    examples: ['npm run list-scripts -- --category search'],
+  },
+  {
+    name: 'list-projects',
+    category: 'workspace',
+    description: 'List available projects in the workspace',
+    usage: './scripts/list-projects',
+    examples: [],
+    note: 'Bash script (Linux/Mac/WSL)',
+  },
+  {
+    name: 'add-project',
+    category: 'workspace',
+    description: 'Add a new project to the workspace',
+    usage: './scripts/add-project <url-or-path>',
+    examples: ['./scripts/add-project https://github.com/org/repo'],
+    note: 'Bash script (Linux/Mac/WSL)',
+  },
+  {
+    name: 'add-example',
+    category: 'workspace',
+    description: 'Add example files for reference',
+    usage: './scripts/add-example <path>',
+    examples: [],
+    note: 'Bash script (Linux/Mac/WSL)',
+  },
+  {
+    name: 'install-skills',
+    category: 'workspace',
+    description: 'Install community skills from GitHub',
+    usage: './scripts/install-skills.sh (or .ps1 on Windows)',
+    examples: [],
+    note: 'Cross-platform (bash + PowerShell)',
+  },
+
+  // Search tools
+  {
+    name: 'session:search',
+    category: 'search',
+    description: 'Semantic search over past sessions (basic)',
+    usage: 'npm run session:search "query"',
+    examples: ['npm run session:search "how to implement auth"'],
+  },
+  {
+    name: 'tiered:search',
+    category: 'search',
+    description: 'Search with memory tiers and recency decay',
+    usage: 'npm run tiered:search "query"',
+    examples: ['npm run tiered:search "docker"', 'npm run tiered:search "react" -k 10'],
+  },
+  {
+    name: 'hybrid:search',
+    category: 'search',
+    description: 'Hybrid semantic + entity search (recommended)',
+    usage: 'npm run hybrid:search "query"',
+    examples: ['npm run hybrid:search "supabase realtime"', 'npm run hybrid:search --stats'],
+  },
+
+  // Embedding tools
+  {
+    name: 'session:embed',
+    category: 'embeddings',
+    description: 'Generate embeddings for session files',
+    usage: 'npm run session:embed',
+    examples: ['npm run session:embed'],
+  },
+  {
+    name: 'session:stats',
+    category: 'embeddings',
+    description: 'Show vector store statistics',
+    usage: 'npm run session:stats',
+    examples: [],
+  },
+  {
+    name: 'tiered:stats',
+    category: 'embeddings',
+    description: 'Show tiered memory statistics',
+    usage: 'npm run tiered:stats',
+    examples: [],
+  },
+  {
+    name: 'tiered:maintenance',
+    category: 'embeddings',
+    description: 'Run memory tier maintenance (cleanup, promote)',
+    usage: 'npm run tiered:maintenance',
+    examples: [],
+  },
+];
+
+const CATEGORIES = {
+  setup: 'Setup',
+  workspace: 'Workspace Management',
+  search: 'Search & Discovery',
+  embeddings: 'Embeddings & Memory',
+};
+
+function printScripts(scripts, format = 'text') {
+  if (format === 'json') {
+    console.log(JSON.stringify(scripts, null, 2));
+    return;
+  }
+
+  console.log('\n╔════════════════════════════════════════════════════════════════╗');
+  console.log('║                  WORKSPACE SCRIPTS                             ║');
+  console.log('╚════════════════════════════════════════════════════════════════╝\n');
+
+  // Group by category
+  const byCategory = {};
+  for (const script of scripts) {
+    if (!byCategory[script.category]) {
+      byCategory[script.category] = [];
+    }
+    byCategory[script.category].push(script);
+  }
+
+  for (const [category, categoryScripts] of Object.entries(byCategory)) {
+    const title = CATEGORIES[category] || category;
+    console.log(`▶ ${title.toUpperCase()}`);
+    console.log('─'.repeat(60));
+
+    for (const script of categoryScripts) {
+      console.log(`  ${script.name}`);
+      console.log(`    ${script.description}`);
+      console.log(`    Usage: ${script.usage}`);
+
+      if (script.note) {
+        console.log(`    Note: ${script.note}`);
+      }
+
+      if (script.examples.length > 0) {
+        console.log(`    Examples:`);
+        for (const ex of script.examples.slice(0, 2)) {
+          console.log(`      $ ${ex}`);
+        }
+      }
+      console.log('');
+    }
+  }
+
+  console.log('═'.repeat(60));
+  console.log('Tip: Use --category <name> to filter by category');
+  console.log('     Use --json for machine-readable output');
+  console.log('');
+}
+
+// Main
+const args = process.argv.slice(2);
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`
+List Scripts - Discover workspace tools
+
+Usage:
+  list-scripts                  Show all scripts
+  list-scripts --category <cat> Filter by category
+  list-scripts --json           Output as JSON
+  list-scripts --help           Show this help
+
+Categories:
+  workspace   - Workspace management tools
+  search      - Search and discovery
+  embeddings  - Embedding and memory tools
+`);
+  process.exit(0);
+}
+
+let filtered = SCRIPTS;
+const format = args.includes('--json') ? 'json' : 'text';
+
+const catIndex = args.indexOf('--category');
+if (catIndex !== -1 && args[catIndex + 1]) {
+  const category = args[catIndex + 1].toLowerCase();
+  filtered = SCRIPTS.filter(s => s.category === category);
+
+  if (filtered.length === 0) {
+    console.log(`No scripts found in category: ${category}`);
+    console.log(`Available categories: ${Object.keys(CATEGORIES).join(', ')}`);
+    process.exit(1);
+  }
+}
+
+printScripts(filtered, format);

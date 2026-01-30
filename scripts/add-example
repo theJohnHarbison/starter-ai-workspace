@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# add-example - Add an example from a file/directory path
+# Compatible with Linux and macOS
+
+set -e
+
+# Get the workspace root directory (handle symlinks)
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+EXAMPLES_DIR="$WORKSPACE_ROOT/agent/_examples"
+
+# Function to show usage
+usage() {
+    echo "Usage: $0 <source_path> [example_name]"
+    echo ""
+    echo "Add a file or directory as an example to the workspace."
+    echo ""
+    echo "Arguments:"
+    echo "  source_path   Path to the file or directory to add as example"
+    echo "  example_name  Optional name for the example (defaults to basename)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 /path/to/my-feature.md"
+    echo "  $0 /path/to/project-dir project-structure"
+    echo "  $0 ./local-file.py python-example"
+    exit 1
+}
+
+# Check arguments
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    usage
+fi
+
+SOURCE_PATH="$1"
+EXAMPLE_NAME="${2:-$(basename "$SOURCE_PATH")}"
+
+# Validate source path
+if [ ! -e "$SOURCE_PATH" ]; then
+    echo "Error: Source path does not exist: $SOURCE_PATH"
+    exit 1
+fi
+
+# Create examples directory if it doesn't exist
+mkdir -p "$EXAMPLES_DIR"
+
+# Determine destination path
+DEST_PATH="$EXAMPLES_DIR/$EXAMPLE_NAME"
+
+# Check if destination already exists
+if [ -e "$DEST_PATH" ]; then
+    echo "Example '$EXAMPLE_NAME' already exists. Overwrite? (y/N)"
+    read -r response
+    if [ "$response" != "y" ] && [ "$response" != "Y" ]; then
+        echo "Cancelled."
+        exit 0
+    fi
+    rm -rf "$DEST_PATH"
+fi
+
+# Create symlink to the source
+echo "Creating symlink: $SOURCE_PATH -> $DEST_PATH"
+ln -s "$(realpath "$SOURCE_PATH")" "$DEST_PATH"
+
+# Create a metadata file with source information
+cat > "$DEST_PATH.meta" << EOF
+{
+  "source_path": "$SOURCE_PATH",
+  "added_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "added_by": "$(whoami)",
+  "type": "$(if [ -d "$DEST_PATH" ]; then echo "directory"; else echo "file"; fi)"
+}
+EOF
+
+echo "✅ Successfully added example: $EXAMPLE_NAME"
+echo "   Source: $SOURCE_PATH"
+echo "   Destination: $DEST_PATH"
+
+# List current examples
+echo ""
+echo "Current examples:"
+ls -la "$EXAMPLES_DIR" | grep -v "\.meta$" | tail -n +2 | while read -r line; do
+    name=$(echo "$line" | awk '{print $NF}')
+    if [ "$name" != "." ] && [ "$name" != ".." ]; then
+        echo "  📁 $name"
+    fi
+done

@@ -1,0 +1,105 @@
+{
+  "extendedThinking": {
+    "enabled": true,
+    "budgetTokens": 10000
+  },
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/log-file-modification.js",
+            "timeout": 1000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/log-command-execution.js",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/skill-suggest.js",
+            "timeout": 1000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/session-memory-lookup.js",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/log-session-start.js",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/export-on-compact.js",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/log-session-end.js",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/export-conversation.js",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  },
+  "plugins": {
+    "hookify": {
+      "enabled": true,
+      "hooksDirectory": "./.claude/hooks"
+    },
+    "commit-commands": {
+      "enabled": true
+    },
+    "pr-review-toolkit": {
+      "enabled": true
+    },
+    "frontend-design@claude-plugins-official": true,
+    "greptile@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true
+  },
+  "permissions": {
+    "defaultLevel": "default"
+  }
+}
