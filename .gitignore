@@ -65,6 +65,10 @@ yarn-error.log*
 nul
 backups/
 
+# Private project docs (local only - add your project-specific docs here)
+docs/projects/*
+!docs/projects/.gitkeep
+
 # https://skills.sh/
 .agents/
 .claude/skills/better-auth-best-practices/
