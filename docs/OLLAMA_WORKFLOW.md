@@ -37,9 +37,58 @@ Ollama runs via Docker (see `docker-compose.yml`) or can be installed natively f
 | Architecture & design decisions | Claude | Requires broader context |
 | Coordination & workflow | Claude | Orchestrates overall task |
 
-### When to Use Local Model (Task Complexity Thresholds)
+### When to Use Local Model (Scope-Based Routing)
 
-**Use Local Model for:**
+The primary routing criterion is **scope** (narrow vs broad context), not perceived difficulty. A "hard" task with narrow scope works locally; an "easy" task requiring broad context needs Claude.
+
+**Route to Ollama when:**
+- Task is scoped to a single function or file
+- Output format can be strictly defined (JSON schema, specific template)
+- Code-to-code transformation (refactoring, translation, boilerplate)
+- Structured analysis with clear input/output contract
+
+**Route to Claude when:**
+- Task requires understanding relationships across multiple files
+- Open-ended analysis or ambiguous requirements
+- Architectural reasoning or design decisions
+- Requires project history or broad codebase context
+
+**Decompose when possible:**
+If a task seems to need Claude but has narrow sub-components, decompose it. Route each sub-task individually — Ollama handles the structured pieces, Claude synthesizes the results.
+
+### Reliability: Retry-with-Validation
+
+Local models produce better results with stochastic generation and retry:
+
+1. Use **temperature 0.75** (not 0) for generation tasks
+2. **Validate output** after each attempt (JSON parse, syntax check, length bounds)
+3. **Retry up to 3x** on validation failure
+4. This pattern brings effective quality from ~78% to 95%+ (per SLM research)
+
+Single deterministic calls (temperature 0) often fail where retry-with-validation succeeds.
+
+### Structured Input/Output
+
+Always provide structured context to Ollama, not raw natural language:
+
+```json
+{
+  "task": "review_function",
+  "language": "typescript",
+  "function_name": "processPayment",
+  "code": "...",
+  "output_format": {
+    "issues": [{"severity": "string", "description": "string", "line": "number"}],
+    "suggestions": [{"description": "string"}]
+  }
+}
+```
+
+Imposing structure on both input and output improves quality and reduces output length.
+
+### Legacy Complexity-Based Reference
+
+**Ollama sweet spot:**
 - Code snippets < 100 lines
 - Syntax validation and code style feedback
 - Refactoring suggestions for isolated functions
@@ -48,12 +97,11 @@ Ollama runs via Docker (see `docker-compose.yml`) or can be installed natively f
 - Generate boilerplate code
 - Explain existing code logic
 
-**Use Claude for:**
+**Claude required:**
 - Complex multi-file refactoring
 - Architecture decisions
 - Debugging complex issues
 - Full system design
-- Requiring deep context across many files
 - Performance optimization analysis
 - Security implications
 
@@ -159,6 +207,6 @@ If you add additional models:
 
 ---
 
-**Last Updated**: 2025-12-02
+**Last Updated**: 2026-02-02
 **Maintained By**: Development team
 **Related**: See CLAUDE.md for workspace guidance

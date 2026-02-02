@@ -175,6 +175,25 @@ npm run session:search "specific terms"
 - Re-evaluate if something unexpected happens
 - Commit after completing logical units of work
 
+## Task Classification
+
+Classify work before starting to choose the right interaction mode:
+
+- **Autonomous (auto-accept)**: Prototyping, test generation, refactoring, docs, boilerplate, unfamiliar-language tasks
+- **Supervised (synchronous)**: Core business logic, security-sensitive changes, architecture decisions, critical bug fixes
+- **Slot machine pattern**: Commit checkpoint → let Claude work → review result → accept or `git reset --hard HEAD~1` and try differently
+
+Restarting fresh usually beats wrestling with bad output. If Claude is over-engineering, interrupt and ask for a simpler approach.
+
+## Tool-Calling Rules
+- Use absolute paths; never `cd` unnecessarily
+- Run `pytest <path>` not `cd <dir> && pytest`
+- Prefer MCP tools over CLI for data access
+- When stuck in a loop (>3 attempts at same fix), stop and try a simpler approach
+- Read files before editing; never guess at file contents
+- After file edits, read the file back to confirm the edit applied correctly
+- After running commands, check exit codes and output before proceeding
+
 ## Working Principles
 - Prefer small, incremental changes over large modifications
 - Edit existing files rather than creating new ones unless necessary
@@ -206,6 +225,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 **Types**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`
+
+### Experimental/Exploratory Work
+When outcome is uncertain, use the checkpoint-revert pattern:
+1. Commit current clean state as a checkpoint
+2. Let Claude work autonomously (auto-accept mode)
+3. Review the result
+4. Accept (continue) or revert (`git reset --hard HEAD~1`) and try a different approach
+
+This is more effective than trying to course-correct bad output mid-stream.
 
 ### Multi-Project Workflow
 1. **Work on one project at a time** - Focus on complete units
