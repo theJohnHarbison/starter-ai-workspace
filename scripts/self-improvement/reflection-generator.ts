@@ -1,7 +1,7 @@
 #!/usr/bin/env ts-node
 /**
  * Reflection Generator (Reflexion): Detect failures in sessions,
- * generate reflections, and store them in Qdrant for future retrieval.
+ * generate reflections using Claude CLI, and store them in Qdrant.
  *
  * Failure signals:
  * - Tool errors followed by 3+ retries
@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Reflection } from './types';
+import * as claude from './claude-client';
 import * as ollama from './ollama-client';
 import * as qdrant from './qdrant-client';
 import { addRule } from './proposal-manager';
@@ -124,45 +125,63 @@ export function detectFailures(sessionData: Record<string, unknown>, sessionId: 
 }
 
 /**
- * Generate a reflection from a failure signal using Ollama.
+ * Generate reflections from multiple failures in one Claude call.
  */
-async function generateReflection(failure: FailureSignal): Promise<Reflection | null> {
-  const prompt = `A developer assistant encountered this failure during a session:
+async function generateReflections(failures: FailureSignal[]): Promise<Array<Reflection | null>> {
+  if (failures.length === 0) return [];
 
-Type: ${failure.type}
-Description: ${failure.description}
-Context: ${failure.context}
+  const prompt = `Analyze these failures from a developer assistant session and provide reflections.
 
-Analyze this failure and provide:
-1. ROOT_CAUSE: What went wrong (one sentence)
-2. REFLECTION: What should have been done differently (one sentence)
-3. PREVENTION_RULE: A specific rule to prevent this in the future (under 50 words)
+${failures.map((f, i) => `
+=== FAILURE ${i + 1} ===
+Type: ${f.type}
+Description: ${f.description}
+Context: ${f.context.substring(0, 400)}
+`).join('\n')}
 
-Format your response exactly as:
+For EACH failure, provide:
+- ROOT_CAUSE: What went wrong (one sentence)
+- REFLECTION: What should have been done differently (one sentence)
+- PREVENTION_RULE: A specific rule to prevent this in the future (under 50 words)
+
+Format each as:
+FAILURE N:
 ROOT_CAUSE: ...
 REFLECTION: ...
 PREVENTION_RULE: ...`;
 
   try {
-    const response = await ollama.generate(prompt, { temperature: 0.3, maxTokens: 300 });
+    const response = await claude.generate(prompt);
 
-    const rootCause = response.match(/ROOT_CAUSE:\s*(.+)/)?.[1]?.trim() || '';
-    const reflection = response.match(/REFLECTION:\s*(.+)/)?.[1]?.trim() || '';
-    const preventionRule = response.match(/PREVENTION_RULE:\s*(.+)/)?.[1]?.trim() || '';
+    // Parse responses for each failure
+    const results: Array<Reflection | null> = [];
 
-    if (!rootCause || !reflection || !preventionRule) return null;
+    for (let i = 0; i < failures.length; i++) {
+      const failure = failures[i];
+      const pattern = new RegExp(
+        `FAILURE\\s*${i + 1}[:\\s]*[\\s\\S]*?ROOT_CAUSE:\\s*(.+?)\\s*REFLECTION:\\s*(.+?)\\s*PREVENTION_RULE:\\s*(.+?)(?=FAILURE\\s*\\d|$)`,
+        'i'
+      );
+      const match = response.match(pattern);
 
-    return {
-      session_id: failure.sessionId,
-      date: new Date().toISOString(),
-      failure_description: failure.description,
-      root_cause: rootCause,
-      reflection,
-      prevention_rule: preventionRule,
-      quality_score: 0, // Will be scored later
-    };
+      if (match) {
+        results.push({
+          session_id: failure.sessionId,
+          date: new Date().toISOString(),
+          failure_description: failure.description,
+          root_cause: match[1].trim(),
+          reflection: match[2].trim(),
+          prevention_rule: match[3].trim(),
+          quality_score: 0,
+        });
+      } else {
+        results.push(null);
+      }
+    }
+
+    return results;
   } catch {
-    return null;
+    return failures.map(() => null);
   }
 }
 
@@ -179,12 +198,15 @@ export async function processSession(sessionPath: string): Promise<number> {
 
   console.log(`Found ${failures.length} failure signal(s) in session ${sessionId}`);
 
+  // Generate reflections in batch
+  const reflections = await generateReflections(failures);
+
   let stored = 0;
-  for (const failure of failures) {
-    const reflection = await generateReflection(failure);
+  for (let i = 0; i < reflections.length; i++) {
+    const reflection = reflections[i];
     if (!reflection) continue;
 
-    // Embed and store the reflection
+    // Embed and store the reflection (using Ollama for embeddings - it's fast)
     const reflectionText = `${reflection.failure_description} | ${reflection.root_cause} | ${reflection.reflection}`;
     try {
       const embedding = await ollama.embed(reflectionText);
@@ -211,13 +233,20 @@ export async function processSession(sessionPath: string): Promise<number> {
 /**
  * Process all sessions or a specific one.
  */
-export async function generateReflections(sessionPath?: string): Promise<number> {
-  console.log('Reflection Generator (Reflexion)');
+export async function generateReflectionsFromSessions(sessionPath?: string): Promise<number> {
+  console.log('Reflection Generator (Reflexion) - Claude CLI');
   console.log('='.repeat(40));
 
+  const claudeOk = await claude.isClaudeAvailable();
+  if (!claudeOk) {
+    console.error('Claude CLI is not available.');
+    return 0;
+  }
+
+  // Ollama still needed for embeddings
   const ollamaOk = await ollama.isOllamaAvailable();
   if (!ollamaOk) {
-    console.error('Ollama is not available.');
+    console.error('Ollama is not available (needed for embeddings).');
     return 0;
   }
 
@@ -256,7 +285,7 @@ export async function generateReflections(sessionPath?: string): Promise<number>
 
 async function main(): Promise<void> {
   const sessionPath = process.argv[2];
-  await generateReflections(sessionPath);
+  await generateReflectionsFromSessions(sessionPath);
 }
 
 if (require.main === module) {

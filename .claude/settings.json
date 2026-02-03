@@ -13,6 +13,11 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/log-file-modification.js",
             "timeout": 1000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/verify-file-references.js",
+            "timeout": 2000
           }
         ]
       },
@@ -51,6 +56,11 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/log-session-start.js",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/score-pending-chunks.js",
+            "timeout": 60000
           }
         ]
       }
@@ -79,6 +89,11 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/export-conversation.js",
             "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/score-session-chunks.js",
+            "timeout": 180000
           },
           {
             "type": "command",

@@ -13,6 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as claude from './claude-client';
 import * as ollama from './ollama-client';
 import * as qdrant from './qdrant-client';
 import { processSession } from './reflection-generator';
@@ -53,12 +54,13 @@ function findLatestSession(): string | null {
 
 async function main(): Promise<void> {
   // Check services are up (with short timeout to not block session end)
-  const [ollamaOk, qdrantOk] = await Promise.all([
-    ollama.isOllamaAvailable(),
+  const [claudeOk, ollamaOk, qdrantOk] = await Promise.all([
+    claude.isClaudeAvailable(),
+    ollama.isOllamaAvailable(), // Still needed for embeddings
     qdrant.isQdrantAvailable(),
   ]);
 
-  if (!ollamaOk || !qdrantOk) {
+  if (!claudeOk || !ollamaOk || !qdrantOk) {
     // Silently exit if services aren't available
     return;
   }

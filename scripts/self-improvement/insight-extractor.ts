@@ -1,14 +1,13 @@
 #!/usr/bin/env ts-node
 /**
  * Insight Extractor (ExpeL): Compare high/low quality session chunks
- * to extract actionable rules.
+ * to extract actionable rules using Claude CLI.
  *
  * Algorithm:
  * 1. Query Qdrant for high-quality (>=7) and low-quality (<=3) chunks
- * 2. Group by entity overlap (same tools, concepts, files)
- * 3. For each success/failure pair, prompt Ollama to extract rules
- * 4. Deduplicate against existing rules
- * 5. Apply or stage via proposal-manager
+ * 2. For each success/failure pair, prompt Claude to extract rules
+ * 3. Deduplicate against existing rules
+ * 4. Apply or stage via proposal-manager
  *
  * Usage:
  *   npm run self:extract-insights
@@ -18,9 +17,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from './types';
-import * as ollama from './ollama-client';
+import * as claude from './claude-client';
 import * as qdrant from './qdrant-client';
-import { addRule, loadRules } from './proposal-manager';
+import { addRule } from './proposal-manager';
 
 function findWorkspaceRoot(): string {
   if (process.env.WORKSPACE_ROOT) return process.env.WORKSPACE_ROOT;
@@ -47,7 +46,7 @@ interface ChunkGroup {
 }
 
 /**
- * Fetch scored chunks from Qdrant and group by content overlap.
+ * Fetch scored chunks from Qdrant and group by quality.
  */
 async function fetchAndGroupChunks(config: Config): Promise<ChunkGroup> {
   const highQuality: ChunkGroup['highQuality'] = [];
@@ -91,7 +90,7 @@ async function fetchAndGroupChunks(config: Config): Promise<ChunkGroup> {
 }
 
 /**
- * Extract rules by comparing high and low quality chunk pairs.
+ * Extract rules by comparing high and low quality chunk pairs using Claude CLI.
  */
 async function extractRulesFromPairs(
   group: ChunkGroup,
@@ -102,53 +101,76 @@ async function extractRulesFromPairs(
   // Take up to maxPairs comparisons
   const pairCount = Math.min(maxPairs, group.highQuality.length, group.lowQuality.length);
 
+  // Build prompts for batching
+  const pairs: Array<{ high: typeof group.highQuality[0]; low: typeof group.lowQuality[0] }> = [];
   for (let i = 0; i < pairCount; i++) {
-    const high = group.highQuality[i];
-    const low = group.lowQuality[i % group.lowQuality.length];
+    pairs.push({
+      high: group.highQuality[i],
+      low: group.lowQuality[i % group.lowQuality.length],
+    });
+  }
 
-    const prompt = `Compare these two session chunks from a developer assistant. Extract 1-3 specific, actionable rules (each under 50 words) that explain what made the first chunk successful and the second chunk fail.
+  // Process in batches of 3 pairs per Claude call
+  const batchSize = 3;
+  for (let i = 0; i < pairs.length; i += batchSize) {
+    const batch = pairs.slice(i, i + batchSize);
 
-HIGH QUALITY chunk (score ${high.score}/10):
-${high.text.substring(0, 800)}
+    const prompt = `Compare these session chunk pairs and extract actionable rules. For each pair, provide 1-2 specific rules (under 50 words each) that explain what made the first chunk successful and the second fail.
 
-LOW QUALITY chunk (score ${low.score}/10):
-${low.text.substring(0, 800)}
+${batch.map((pair, idx) => `
+=== PAIR ${idx + 1} ===
+HIGH QUALITY (score ${pair.high.score}/10):
+${pair.high.text.substring(0, 600)}
 
-Return ONLY the rules, one per line, starting with "- ". No other text.`;
+LOW QUALITY (score ${pair.low.score}/10):
+${pair.low.text.substring(0, 600)}
+`).join('\n')}
+
+Return ONLY the rules, one per line, starting with "- ". Group by pair number.
+Example:
+PAIR 1:
+- Rule about what worked vs what didn't
+PAIR 2:
+- Another rule`;
 
     try {
-      const response = await ollama.generate(prompt, { temperature: 0.3, maxTokens: 300 });
+      const response = await claude.generate(prompt);
       const lines = response.split('\n').filter(l => l.trim().startsWith('- '));
 
       for (const line of lines) {
         const ruleText = line.replace(/^-\s*/, '').trim();
         if (ruleText.length > 10 && ruleText.length < 200) {
+          // Associate with session IDs from this batch
+          const sessionIds = batch.flatMap(p => [p.high.sessionId, p.low.sessionId]).filter(Boolean);
           extracted.push({
             text: ruleText,
-            sessionIds: [high.sessionId, low.sessionId].filter(Boolean),
+            sessionIds: [...new Set(sessionIds)],
           });
         }
       }
+
+      process.stdout.write(`\r  Processed ${Math.min(i + batchSize, pairs.length)}/${pairs.length} pairs...`);
     } catch (err) {
-      console.error(`Failed to extract from pair ${i}:`, (err as Error).message);
+      console.error(`\n  Failed to extract from batch ${i / batchSize + 1}:`, (err as Error).message);
     }
   }
 
+  console.log('');
   return extracted;
 }
 
 export async function extractInsights(options?: { dryRun?: boolean }): Promise<number> {
   const config = loadConfig();
 
-  console.log('Insight Extractor (ExpeL)');
+  console.log('Insight Extractor (ExpeL) - Claude CLI');
   console.log('='.repeat(40));
 
   // Check services
-  const ollamaOk = await ollama.isOllamaAvailable();
+  const claudeOk = await claude.isClaudeAvailable();
   const qdrantOk = await qdrant.isQdrantAvailable();
 
-  if (!ollamaOk) {
-    console.error('Ollama is not available. Cannot extract insights.');
+  if (!claudeOk) {
+    console.error('Claude CLI is not available. Cannot extract insights.');
     return 0;
   }
   if (!qdrantOk) {
@@ -183,9 +205,9 @@ export async function extractInsights(options?: { dryRun?: boolean }): Promise<n
     );
     if (result.applied) {
       applied++;
-      console.log(`  ✓ Applied: "${candidate.text}"`);
+      console.log(`  ✓ Applied: "${candidate.text.substring(0, 60)}..."`);
     } else {
-      console.log(`  → ${result.reason}: "${candidate.text}"`);
+      console.log(`  → ${result.reason}: "${candidate.text.substring(0, 60)}..."`);
     }
   }
 

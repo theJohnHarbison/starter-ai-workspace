@@ -16,6 +16,7 @@
     "hybrid:stats": "cd scripts/session-embedder && ts-node hybrid-search.ts --stats",
     "session:visualize": "cd scripts/session-embedder && ts-node visualize.ts",
     "session:topics": "cd scripts/session-embedder && ts-node topic-map.ts",
+    "session:score": "cd scripts/session-embedder && ts-node quality-scorer.ts",
     "list-scripts": "node scripts/list-scripts",
     "hook:session-start": "node .claude/hooks/knowledge-capture/scripts/session-start.js",
     "hook:session-end": "node .claude/hooks/knowledge-capture/scripts/session-end.js",
