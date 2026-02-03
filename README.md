@@ -83,6 +83,7 @@ ai-workspace/
 ├── docs/                   # Documentation
 ├── scripts/
 │   ├── session-embedder/   # Session embedding system
+│   ├── self-improvement/   # Self-improvement system (ExpeL-based)
 │   ├── setup-models.js     # Pull required Ollama models
 │   ├── add-project         # Add projects (bash)
 │   ├── add-example         # Add examples (bash)
@@ -137,6 +138,8 @@ The topic map is also automatically regenerated after each `npm run session:embe
 | `npm run session:stats` | Show embedding statistics |
 | `npm run session:topics` | Generate interactive topic map visualization |
 | `npm run session:visualize` | Generate session embedding visualization |
+| `npm run self:maintenance` | Run full self-improvement cycle |
+| `npm run self:stats` | Show rule/reflection statistics |
 | `npm run list-scripts` | Show all available scripts |
 
 ## Skills
@@ -167,6 +170,71 @@ Workspace hooks in `.claude/hooks/` enforce code quality:
 - Block hardcoded secrets
 - Warn about `console.log` and debug code
 - Warn about `.forEach()` (prefer `for...of`)
+
+## Self-Improvement System
+
+The workspace includes an autonomous self-improvement loop inspired by ExpeL, Voyager, and Reflexion research. It learns from session patterns and automatically updates guidance in CLAUDE.md.
+
+### How It Works
+
+1. **Session Scoring** - Chunks from past sessions are scored by quality
+2. **Insight Extraction** - Compares successful vs unsuccessful patterns to extract rules
+3. **Reflection Generation** - Analyzes failures to generate improvement reflections
+4. **Rule Management** - Auto-applies proven rules, prunes stale ones (60-day threshold)
+
+### Auto-Running Behavior
+
+The system can run automatically via hooks (configured in `scripts/self-improvement/config.json`):
+- **Mode**: `autonomous` (auto-commits rules), `supervised` (proposes only), or `manual`
+- **Triggers**: Session end hooks, manual commands
+- **Safety**: All changes are atomic git commits, revertable with `git revert <hash>`
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/improve` | Force manual insight extraction |
+| `/review-improvements` | Show auto-applied rules and pending proposals |
+| `/apply-improvements` | Apply pending proposals |
+| `/approve-skill` | Promote a skill candidate to active |
+
+### NPM Scripts
+
+```bash
+# View current state
+npm run self:stats              # Rule/reflection statistics
+npm run self:review             # Review pending proposals
+
+# Run maintenance
+npm run self:maintenance        # Full maintenance cycle
+npm run session:score           # Score session chunks (required for insights)
+
+# Individual operations
+npm run self:extract-insights   # Extract rules from session pairs
+npm run self:generate-reflections  # Generate failure reflections
+npm run self:propose-skills     # Scan for novel skill candidates
+npm run self:prune              # Remove stale rules
+npm run self:apply              # Apply pending proposals
+```
+
+### Reverting Changes
+
+All self-improvement commits use the prefix `chore(self-improve):`. To revert:
+
+```bash
+# Find the commit
+git log --oneline --grep="self-improve"
+
+# Revert it
+git revert <commit-hash>
+```
+
+### Limits & Safety
+
+- Maximum 30 active rules
+- 60-day staleness pruning
+- Cannot edit its own hooks, settings, or security config
+- Ollama validation gate for rule quality
 
 ## Project Management
 
