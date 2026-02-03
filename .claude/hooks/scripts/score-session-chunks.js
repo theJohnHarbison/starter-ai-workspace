@@ -2,9 +2,8 @@
 /**
  * Score current session's chunks on session end.
  *
- * Called from SessionEnd hook. Behavior depends on exit reason:
- * - exit: Mark chunks as pending (fast, don't block exit)
- * - clear/other: Score immediately
+ * Called from SessionEnd hook. Always marks chunks as pending (fast path).
+ * Scoring is deferred to session start where the user can choose to run it.
  *
  * Requires session to be embedded first (export-conversation.js runs before this).
  */
@@ -30,8 +29,6 @@ async function scoreSessionChunks() {
     const hookInput = JSON.parse(stdinData);
 
     const sessionId = hookInput.session_id;
-    const reason = hookInput.reason || 'exit';
-
     if (!sessionId) return;
 
     // Check if Qdrant is available
@@ -70,50 +67,32 @@ async function scoreSessionChunks() {
       // Embedding failed - continue anyway, chunks may already exist
     }
 
-    // Check if this is an exit (no time for full scoring)
-    if (reason === 'exit' || reason === 'logout') {
-      // Mark this session's unscored chunks as pending
-      const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          limit: 1000,
-          filter: {
-            must: [{ key: 'session_id', match: { value: sessionId } }],
-            must_not: [{ key: 'quality_score', match: { any: [0,1,2,3,4,5,6,7,8,9,10] } }]
-          }
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const points = data.result?.points || [];
-
-        if (points.length > 0) {
-          // Mark as pending
-          await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/payload`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              points: points.map(p => p.id),
-              payload: { pending_score: true },
-            }),
-          });
+    // Always use fast path: mark unscored chunks as pending for later scoring
+    const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        limit: 1000,
+        filter: {
+          must: [{ key: 'session_id', match: { value: sessionId } }],
+          must_not: [{ key: 'quality_score', match: { any: [0,1,2,3,4,5,6,7,8,9,10] } }]
         }
-      }
-    } else {
-      // Not an exit - we have time to score
-      try {
-        execSync(
-          `npx ts-node "${path.join(workspaceRoot, 'scripts/session-embedder/quality-scorer.ts')}" --session "${sessionId}"`,
-          {
-            cwd: workspaceRoot,
-            stdio: 'pipe',
-            timeout: 120000, // 2 minutes for scoring
-          }
-        );
-      } catch (e) {
-        // Scoring failed - will be picked up as pending next session
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const points = data.result?.points || [];
+
+      if (points.length > 0) {
+        await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/payload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            points: points.map(p => p.id),
+            payload: { pending_score: true },
+          }),
+        });
       }
     }
 
