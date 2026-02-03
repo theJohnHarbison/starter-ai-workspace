@@ -81,6 +81,7 @@ Use these powerful workspace tools to enhance your capabilities:
 - **/commit**: Create conventional commits with proper formatting
 - **/debug**: Systematic debugging with 4-phase root cause analysis
 - **/pr-review**: Comprehensive pull request review
+- **/session-review**: End-of-session review with CLAUDE.md improvement suggestions
 
 **Session Memory & Search:**
 - **session:search**: Search past sessions semantically (`npm run session:search "query"`)
@@ -142,15 +143,20 @@ Follow this approach for EVERY non-trivial task:
 **You MUST search session memory before starting work:**
 
 ```bash
-# Search session memory for relevant past work
+# Recommended default: tiered search (recency-weighted, avoids stale results)
+npm run tiered:search "your topic or keywords"
+
+# Hybrid search (semantic + entity extraction, good for specific terms)
 npm run hybrid:search "your topic or keywords"
 
-# Tiered search (weights recent sessions higher)
-npm run tiered:search "your topic"
-
-# Basic semantic search
+# Basic semantic search (when recency doesn't matter)
 npm run session:search "specific terms"
 ```
+
+**Interpret results carefully:**
+- Results older than 30 days may reference outdated code — verify before acting
+- If multiple results say the same thing, look for diverse perspectives too
+- Always confirm that referenced files/functions still exist in the codebase
 
 **Why this matters:**
 - Avoid repeating work already done in past sessions
@@ -171,7 +177,8 @@ npm run session:search "specific terms"
 
 ### 4. ACT - Execute with small, focused steps
 - Make incremental changes
-- Verify each step works before proceeding
+- **Verify each step before proceeding** (read files back after edits, check exit codes after commands)
+- If a step produces unexpected results, STOP and re-evaluate — do not continue on a potentially wrong premise
 - Re-evaluate if something unexpected happens
 - Commit after completing logical units of work
 
