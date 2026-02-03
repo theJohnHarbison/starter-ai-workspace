@@ -85,6 +85,26 @@ async function main() {
 
     logSearch(trimmed, result, Date.now() - startTime);
 
+    // Search reflections collection too
+    let reflections = [];
+    try {
+      const refRes = await fetch(`${QDRANT_URL}/collections/reflections/points/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vector: embedding,
+          limit: 2,
+          with_payload: true,
+          score_threshold: 0.7,
+        }),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (refRes.ok) {
+        const refData = await refRes.json();
+        reflections = refData.result || [];
+      }
+    } catch {} // Silently ignore if reflections collection doesn't exist
+
     // Format output
     const lines = ['<session-memory>', `Found ${result.length} relevant past session(s):`, ''];
     for (const hit of result) {
@@ -99,6 +119,21 @@ async function main() {
       lines.push(text);
       lines.push('');
     }
+    // Add reflections if any
+    if (reflections.length > 0) {
+      lines.push('Past failure reflections:');
+      lines.push('');
+      for (const ref of reflections) {
+        const score = Math.round(ref.score * 100);
+        const p = ref.payload || {};
+        lines.push(`[${score}% match | reflection]`);
+        lines.push(`Failure: ${p.failure_description || ''}`);
+        lines.push(`Root cause: ${p.root_cause || ''}`);
+        lines.push(`Prevention: ${p.prevention_rule || ''}`);
+        lines.push('');
+      }
+    }
+
     lines.push('</session-memory>');
     console.log(lines.join('\n'));
   } catch {

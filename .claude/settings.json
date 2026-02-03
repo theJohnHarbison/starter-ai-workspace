@@ -79,6 +79,11 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/export-conversation.js",
             "timeout": 10000
+          },
+          {
+            "type": "command",
+            "command": "npx ts-node scripts/self-improvement/on-session-end.ts",
+            "timeout": 30000
           }
         ]
       }
