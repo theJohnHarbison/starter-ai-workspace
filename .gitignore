@@ -69,6 +69,11 @@ backups/
 docs/projects/*
 !docs/projects/.gitkeep
 
+# Self-improvement generated data (user-specific)
+scripts/self-improvement/rules.json
+scripts/self-improvement/staged-changes/
+scripts/self-improvement/skill-candidates/
+
 # https://skills.sh/
 .agents/
 .claude/skills/better-auth-best-practices/

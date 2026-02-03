@@ -89,6 +89,14 @@ Use these powerful workspace tools to enhance your capabilities:
 - **tiered:search**: Memory-tier aware search (`npm run tiered:search "query"`)
 - **session:stats**: View embedding statistics (`npm run session:stats`)
 
+**Self-Improvement:**
+- **/improve**: Force insight extraction from past sessions
+- **/review-improvements**: Review auto-applied rules and pending proposals
+- **/apply-improvements**: Apply pending proposals
+- **/approve-skill**: Promote a skill candidate to active skills
+- **self:maintenance**: Full maintenance cycle (`npm run self:maintenance`)
+- **self:stats**: View rule/reflection statistics (`npm run self:stats`)
+
 **Task Management:**
 - **Create tasks**: Add tasks to `agent/_tasks/<project>/` as markdown files (see structure below)
 
@@ -433,6 +441,36 @@ Workspace hooks enforce code quality and security standards:
 | `warn-interface-prefix` | Warn | `interface IFoo` | Suggests modern naming |
 
 Hooks are configured in `.claude/hooks/` and travel with the workspace repo.
+
+## Self-Improving Agent System
+
+This workspace includes an autonomous self-improvement loop based on ExpeL, Voyager, Reflexion, and MemGPT research. The system reviews sessions, extracts rules from successes/failures, generates skills from novel tasks, and updates CLAUDE.md — all auto-applied via git commits and revertable with `git revert`.
+
+**Mode**: Configured in `scripts/self-improvement/config.json` (default: `autonomous`)
+
+**Commands**:
+- `/improve` — Force manual insight extraction
+- `/review-improvements` — Show auto-applied rules and pending proposals
+- `/apply-improvements` — Apply pending proposals
+- `/approve-skill` — Promote a skill candidate
+
+**NPM Scripts**:
+```bash
+npm run self:stats           # Show rule/reflection statistics
+npm run self:maintenance     # Run full maintenance cycle
+npm run self:extract-insights # Extract rules from session pairs
+npm run self:generate-reflections # Generate failure reflections
+npm run self:propose-skills  # Scan for novel skill candidates
+npm run self:prune           # Remove stale rules
+npm run self:review          # Review current state
+npm run self:apply           # Apply pending proposals
+```
+
+**Safety**: All changes are atomic git commits (`chore(self-improve): ...`). Revert any change with `git revert <hash>`. Max 30 active rules, 60-day staleness pruning, Ollama validation gate. The system cannot edit its own hooks, settings, or security config.
+
+## Learned Rules
+<!-- AUTO-MANAGED by self-improvement system. Do not edit manually. -->
+<!-- No rules yet. Rules are auto-extracted from session analysis. -->
 
 ## Before You Start
 

@@ -1,0 +1,10 @@
+{
+  "approvalMode": "autonomous",
+  "maxActiveRules": 30,
+  "stalenessThresholdDays": 60,
+  "minReinforcementsToKeep": 2,
+  "noveltyThreshold": 0.6,
+  "qualityThresholdSuccess": 7,
+  "qualityThresholdFailure": 3,
+  "deduplicationSimilarity": 0.85
+}
