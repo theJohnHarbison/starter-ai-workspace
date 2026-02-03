@@ -40,7 +40,7 @@ This workspace requires and automatically starts:
 
 | Service | Purpose | URL | Port |
 |---------|---------|-----|------|
-| **Ollama** | Local LLM (`qwen2.5-coder:7b`) and embeddings (`nomic-embed-text`) | http://localhost:11434 | 11434 |
+| **Ollama** | Embeddings (`nomic-embed-text`) for session memory | http://localhost:11434 | 11434 |
 | **Qdrant** | Vector database for session embeddings | http://localhost:6333 | 6333 |
 
 Start/stop all services with:
@@ -58,7 +58,7 @@ You are working in a structured workspace with specialized tools and skills desi
 
 **Important**: Skills are auto-loaded from `.claude/skills/` based on context.
 
-**Important**: Use the local Ollama model (`qwen2.5-coder:7b`) for token-efficient code analysis and generation. See **[docs/OLLAMA_WORKFLOW.md](docs/OLLAMA_WORKFLOW.md)** for when to use local vs Claude.
+**Note**: Ollama is used only for embeddings. All LLM tasks (scoring, insights, validation) use Claude CLI.
 
 ## Security & Configuration
 - **`.mcp.json`**: Contains authentication tokens - NEVER commit to git
@@ -458,6 +458,7 @@ This workspace includes an autonomous self-improvement loop based on ExpeL, Voya
 ```bash
 npm run self:stats           # Show rule/reflection statistics
 npm run self:maintenance     # Run full maintenance cycle
+npm run session:score        # Score session chunks (required for insights)
 npm run self:extract-insights # Extract rules from session pairs
 npm run self:generate-reflections # Generate failure reflections
 npm run self:propose-skills  # Scan for novel skill candidates
@@ -466,11 +467,48 @@ npm run self:review          # Review current state
 npm run self:apply           # Apply pending proposals
 ```
 
-**Safety**: All changes are atomic git commits (`chore(self-improve): ...`). Revert any change with `git revert <hash>`. Max 30 active rules, 60-day staleness pruning, Ollama validation gate. The system cannot edit its own hooks, settings, or security config.
+**Safety**: All changes are atomic git commits (`chore(self-improve): ...`). Revert any change with `git revert <hash>`. Max 30 active rules, 60-day staleness pruning, Claude CLI validation gate. The system cannot edit its own hooks, settings, or security config.
 
 ## Learned Rules
 <!-- AUTO-MANAGED by self-improvement system. Do not edit manually. -->
-<!-- No rules yet. Rules are auto-extracted from session analysis. -->
+<!-- Rule: zjim5wo9 | Reinforced: 0 | Last: 2026-02-03 -->
+- When debugging TypeScript type errors, read tsconfig.json first
+<!-- Rule: uvagqabv | Reinforced: 0 | Last: 2026-02-03 -->
+- Prefer for...of over .forEach() for better readability and break support
+<!-- Rule: mxvx8m2g | Reinforced: 0 | Last: 2026-02-03 -->
+- Always ensure that you understand the implications of commands like git reset and git revert before executing them.
+<!-- Rule: hucbah4s | Reinforced: 0 | Last: 2026-02-03 -->
+- Always verify completion of all required steps in a pattern before moving on to the next phase of analysis or implementation.
+<!-- Rule: gr565yqn | Reinforced: 0 | Last: 2026-02-03 -->
+- Ensure all operations align with the system's supported capabilities before execution.
+<!-- Rule: ulty507o | Reinforced: 0 | Last: 2026-02-03 -->
+- When debugging hooks, examine actual hook script content and settings configuration rather than relying on truncated or corrupted output
+<!-- Rule: mxvgwyxy | Reinforced: 0 | Last: 2026-02-03 -->
+- Verify tool output is complete and readable before drawing conclusions; base64-encoded or binary data indicates wrong file type or encoding issue
+<!-- Rule: mcg38g8x | Reinforced: 0 | Last: 2026-02-03 -->
+- Include concrete examples (regex patterns, JSON configs) alongside explanatory text to make documentation immediately usable
+<!-- Rule: ombpbsu8 | Reinforced: 0 | Last: 2026-02-03 -->
+- Configuration documentation should show complete, copy-pasteable examples with realistic option values and clear structure
+<!-- Rule: t7qaxyg3 | Reinforced: 0 | Last: 2026-02-03 -->
+- When encountering corrupted/garbled output, immediately investigate the source (encoding, hooks, plugins) rather than attempting to interpret meaningless data
+<!-- Rule: fsiyg08m | Reinforced: 0 | Last: 2026-02-03 -->
+- Ensure session chunks capture semantic meaning (what was accomplished) rather than system internals (signature hashes, hook debugging)
+<!-- Rule: 1n77h474 | Reinforced: 0 | Last: 2026-02-03 -->
+- Document command workflows with clear structure (numbered steps, categorized outputs) rather than mid-conversation context that references unclear prior state
+<!-- Rule: 71g5qbky | Reinforced: 0 | Last: 2026-02-03 -->
+- High-value chunks are self-contained with enough context to be useful standalone; low-value chunks depend on missing conversation context
+<!-- Rule: vdw30cfl | Reinforced: 0 | Last: 2026-02-03 -->
+- Session chunks should contain the distilled output/knowledge, not the raw LLM reasoning traces or cryptographic signatures from API responses
+<!-- Rule: yefa7gcu | Reinforced: 0 | Last: 2026-02-03 -->
+- When documenting systems, include purpose, configuration options, and practical use cases rather than raw data dumps
+<!-- Rule: qqm6774s | Reinforced: 0 | Last: 2026-02-03 -->
+- Successful chunks explain the "why" and "how" of system behavior (trigger conditions, input formats, file naming conventions) while failed chunks show only status output without actionable context
+<!-- Rule: ex09td3n | Reinforced: 0 | Last: 2026-02-03 -->
+- Avoid logging repetitive status checks that show no change; instead capture state transitions or meaningful events that provide debugging value
+<!-- Rule: jgxt90yw | Reinforced: 0 | Last: 2026-02-03 -->
+- When debugging container workflows, trace the full data flow architecture first (input paths, output paths, job queuing) before checking container status or logs
+<!-- Rule: 5inlxptr | Reinforced: 0 | Last: 2026-02-03 -->
+- Verify that job queuing mechanisms have actually created work items before assuming containers will process them automatically
 
 ## Before You Start
 

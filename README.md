@@ -32,8 +32,10 @@ cp .mcp.json.example .mcp.json
 **Services started by docker-compose:**
 | Service | Purpose | URL |
 |---------|---------|-----|
-| Ollama | Local LLM (`qwen2.5-coder:7b`) and embeddings (`nomic-embed-text`) | http://localhost:11434 |
+| Ollama | Embeddings (`nomic-embed-text`) for session memory | http://localhost:11434 |
 | Qdrant | Vector database for session memory | http://localhost:6333 |
+
+**Note:** LLM tasks (scoring, insight extraction, reflections) use Claude CLI for speed. Ollama is only used for embeddings.
 
 ## Session Memory System
 
@@ -138,6 +140,7 @@ The topic map is also automatically regenerated after each `npm run session:embe
 | `npm run session:stats` | Show embedding statistics |
 | `npm run session:topics` | Generate interactive topic map visualization |
 | `npm run session:visualize` | Generate session embedding visualization |
+| `npm run session:score` | Score session chunks (required for insights) |
 | `npm run self:maintenance` | Run full self-improvement cycle |
 | `npm run self:stats` | Show rule/reflection statistics |
 | `npm run list-scripts` | Show all available scripts |
@@ -177,16 +180,20 @@ The workspace includes an autonomous self-improvement loop inspired by ExpeL, Vo
 
 ### How It Works
 
-1. **Session Scoring** - Chunks from past sessions are scored by quality
-2. **Insight Extraction** - Compares successful vs unsuccessful patterns to extract rules
-3. **Reflection Generation** - Analyzes failures to generate improvement reflections
+All LLM tasks use **Claude CLI** for speed (Ollama only handles embeddings):
+
+1. **Session Scoring** - Chunks scored by quality using Claude CLI (batched, with pre-filtering)
+2. **Insight Extraction** - Compares successful vs unsuccessful patterns using Claude CLI
+3. **Reflection Generation** - Analyzes failures using Claude CLI to generate improvement reflections
 4. **Rule Management** - Auto-applies proven rules, prunes stale ones (60-day threshold)
 
 ### Auto-Running Behavior
 
-The system can run automatically via hooks (configured in `scripts/self-improvement/config.json`):
+The system runs automatically via hooks:
+- **Session end** (`/clear`): Embeds and scores current session chunks immediately
+- **Session exit** (`/exit`): Marks unscored chunks as "pending" for fast exit
+- **Session start**: Scores any pending chunks from previous sessions
 - **Mode**: `autonomous` (auto-commits rules), `supervised` (proposes only), or `manual`
-- **Triggers**: Session end hooks, manual commands
 - **Safety**: All changes are atomic git commits, revertable with `git revert <hash>`
 
 ### Commands

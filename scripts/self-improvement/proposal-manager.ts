@@ -2,7 +2,7 @@
 /**
  * Proposal Manager: Stage, review, validate, and apply changes to CLAUDE.md and skills.
  *
- * In autonomous mode: validates via Ollama → writes to CLAUDE.md → git commits.
+ * In autonomous mode: validates via Claude CLI → writes to CLAUDE.md → git commits.
  * In propose-and-confirm mode: stages proposals for manual review.
  *
  * Usage:
@@ -16,7 +16,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { Rule, StagedChange, Config } from './types';
-import * as ollama from './ollama-client';
+import * as claude from './claude-client';
+import * as ollama from './ollama-client'; // For embeddings only
 
 const WORKSPACE_ROOT = findWorkspaceRoot();
 const RULES_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/rules.json');
@@ -66,13 +67,13 @@ function generateId(): string {
 }
 
 /**
- * Validate a rule using Ollama: check coherence, non-contradiction, specificity.
+ * Validate a rule using Claude CLI: check coherence, non-contradiction, specificity.
  * Returns { valid: boolean, reason: string }.
  */
 export async function validateRule(ruleText: string, existingRules: Rule[]): Promise<{ valid: boolean; reason: string }> {
-  const available = await ollama.isOllamaAvailable();
+  const available = await claude.isClaudeAvailable();
   if (!available) {
-    return { valid: false, reason: 'Ollama unavailable — staging instead of auto-applying' };
+    return { valid: false, reason: 'Claude CLI unavailable — staging instead of auto-applying' };
   }
 
   const existingTexts = existingRules
@@ -96,11 +97,12 @@ Check these criteria:
 Respond with exactly one line: VALID or INVALID: <reason>`;
 
   try {
-    const response = await ollama.generate(prompt, { temperature: 0.1, maxTokens: 100 });
-    if (response.startsWith('VALID')) {
+    const response = await claude.generate(prompt);
+    const firstLine = response.trim().split('\n')[0];
+    if (firstLine.toUpperCase().startsWith('VALID')) {
       return { valid: true, reason: 'Passed validation' };
     }
-    const reason = response.replace(/^INVALID:\s*/, '');
+    const reason = firstLine.replace(/^INVALID:\s*/i, '');
     return { valid: false, reason };
   } catch {
     return { valid: false, reason: 'Validation failed — staging instead' };
