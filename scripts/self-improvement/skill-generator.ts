@@ -6,7 +6,7 @@
  * Algorithm:
  * 1. Summarize session, embed summary, search existing sessions
  * 2. If top-3 similarity < noveltyThreshold AND quality >= 7 → novel success
- * 3. Prompt Ollama to generate SKILL.md content
+ * 3. Prompt Claude CLI to generate SKILL.md content
  * 4. Write to skill-candidates/ or auto-promote to .claude/skills/
  *
  * Usage:
@@ -18,7 +18,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { SkillCandidate, Config } from './types';
-import * as ollama from './ollama-client';
+import * as claude from './claude-client';
+import * as ollama from './ollama-client'; // For embeddings only
 import * as qdrant from './qdrant-client';
 
 function findWorkspaceRoot(): string {
@@ -43,7 +44,7 @@ function loadConfig(): Config {
 }
 
 /**
- * Summarize a session file using Ollama.
+ * Summarize a session file using Claude CLI.
  */
 async function summarizeSession(sessionPath: string): Promise<string> {
   const sessionData = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
@@ -70,7 +71,7 @@ ${sessionText.substring(0, 3000)}
 
 Summary:`;
 
-  return ollama.generate(prompt, { temperature: 0.2, maxTokens: 200 });
+  return claude.generate(prompt);
 }
 
 /**
@@ -145,7 +146,7 @@ auto_activation:
 Return ONLY the SKILL.md content, nothing else.`;
 
   try {
-    const skillMd = await ollama.generate(skillPrompt, { temperature: 0.3, maxTokens: 800 });
+    const skillMd = await claude.generate(skillPrompt);
 
     // Extract name from frontmatter
     const nameMatch = skillMd.match(/name:\s*(.+)/);

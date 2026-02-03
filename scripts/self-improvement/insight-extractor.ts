@@ -46,6 +46,54 @@ interface ChunkGroup {
 }
 
 /**
+ * Filter out meta-observations that describe chunks rather than providing actionable guidance.
+ */
+function isActionableRule(text: string): boolean {
+  const lowerText = text.toLowerCase();
+
+  // Reject patterns that describe chunks rather than provide guidance
+  const metaObservationPatterns = [
+    /^the (first|second|high|low|good|bad) (chunk|quality)/i,
+    /^it (provided|included|was|lacked|failed|succeeded)/i,
+    /chunk (was|is|failed|succeeded|provided|lacked)/i,
+    /was successful because/i,
+    /failed (because|due to)/i,
+    /which made it (successful|fail)/i,
+    /leading to its (success|failure)/i,
+    /^(this|that) (chunk|approach|method)/i,
+  ];
+
+  for (const pattern of metaObservationPatterns) {
+    if (pattern.test(text)) {
+      return false;
+    }
+  }
+
+  // Prefer rules that start with imperative verbs
+  const imperativeStarts = [
+    'always', 'never', 'verify', 'ensure', 'include', 'document',
+    'check', 'use', 'avoid', 'prefer', 'when', 'before', 'after',
+    'provide', 'structure', 'organize', 'validate', 'confirm'
+  ];
+
+  const startsWithImperative = imperativeStarts.some(verb =>
+    lowerText.startsWith(verb) || lowerText.startsWith(verb + ' ')
+  );
+
+  // If it doesn't start with an imperative verb, it's likely a meta-observation
+  if (!startsWithImperative) {
+    // Check if it at least contains actionable language
+    const actionableIndicators = ['should', 'must', 'need to', 'important to'];
+    const hasActionableLanguage = actionableIndicators.some(ind => lowerText.includes(ind));
+    if (!hasActionableLanguage) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Fetch scored chunks from Qdrant and group by quality.
  */
 async function fetchAndGroupChunks(config: Config): Promise<ChunkGroup> {
@@ -115,7 +163,23 @@ async function extractRulesFromPairs(
   for (let i = 0; i < pairs.length; i += batchSize) {
     const batch = pairs.slice(i, i + batchSize);
 
-    const prompt = `Compare these session chunk pairs and extract actionable rules. For each pair, provide 1-2 specific rules (under 50 words each) that explain what made the first chunk successful and the second fail.
+    const prompt = `You are extracting ACTIONABLE RULES for a developer assistant. Compare these session chunk pairs and extract rules that tell the assistant WHAT TO DO.
+
+CRITICAL REQUIREMENTS:
+- Rules MUST be imperative commands (start with verbs like "Always", "Never", "Verify", "Include", "Document")
+- Rules must be actionable guidance, NOT observations about the chunks
+- DO NOT write "The chunk was successful because..." or "The HIGH QUALITY chunk..."
+- DO NOT describe what happened - describe what TO DO
+
+GOOD rule examples:
+- "Always include concrete examples alongside explanatory text"
+- "Verify output is complete before drawing conclusions"
+- "Document command workflows with numbered steps"
+
+BAD rule examples (DO NOT GENERATE THESE):
+- "The first chunk was successful because it provided clear information" (observation, not actionable)
+- "The HIGH QUALITY chunk is structured and detailed" (describes chunk, not guidance)
+- "It included specific details about the queue" (starts with "It", not imperative)
 
 ${batch.map((pair, idx) => `
 === PAIR ${idx + 1} ===
@@ -126,12 +190,7 @@ LOW QUALITY (score ${pair.low.score}/10):
 ${pair.low.text.substring(0, 600)}
 `).join('\n')}
 
-Return ONLY the rules, one per line, starting with "- ". Group by pair number.
-Example:
-PAIR 1:
-- Rule about what worked vs what didn't
-PAIR 2:
-- Another rule`;
+Extract 1-2 IMPERATIVE rules per pair (under 50 words each). Return ONLY the rules, one per line, starting with "- ".`;
 
     try {
       const response = await claude.generate(prompt);
@@ -139,7 +198,7 @@ PAIR 2:
 
       for (const line of lines) {
         const ruleText = line.replace(/^-\s*/, '').trim();
-        if (ruleText.length > 10 && ruleText.length < 200) {
+        if (ruleText.length > 10 && ruleText.length < 200 && isActionableRule(ruleText)) {
           // Associate with session IDs from this batch
           const sessionIds = batch.flatMap(p => [p.high.sessionId, p.low.sessionId]).filter(Boolean);
           extracted.push({
