@@ -32,7 +32,7 @@ async function scoreSessionChunks() {
     if (!sessionId) return;
 
     // Check if Qdrant is available
-    const healthCheck = await fetch(`${QDRANT_URL}/health`);
+    const healthCheck = await fetch(`${QDRANT_URL}/healthz`);
     if (!healthCheck.ok) return;
 
     const workspaceRoot = findWorkspaceRoot();
