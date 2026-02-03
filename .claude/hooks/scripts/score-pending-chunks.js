@@ -28,7 +28,7 @@ async function qdrantCount(filter) {
 async function checkPendingWork() {
   try {
     // Check if Qdrant is available
-    const healthCheck = await fetch(`${QDRANT_URL}/health`, {
+    const healthCheck = await fetch(`${QDRANT_URL}/healthz`, {
       signal: AbortSignal.timeout(2000),
     });
     if (!healthCheck.ok) return;
