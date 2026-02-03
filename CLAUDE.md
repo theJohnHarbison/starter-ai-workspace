@@ -138,6 +138,28 @@ npm run tiered:search "architecture decision for X"
 
 Sessions are automatically embedded when you run `npm run session:embed`.
 
+## Interactive Self-Improvement on Session Start
+
+When a session starts, a hook checks for pending self-improvement work and may output a `<pending-self-improvement>` block in the session context. This describes deferred scoring and insight extraction from previous sessions.
+
+### How to Handle
+
+When you see `<pending-self-improvement>`:
+
+1. **Use AskUserQuestion** to offer the user a choice:
+   - **"Score pending sessions"** — runs `npm run session:score` (time estimate shown in the block)
+   - **"Score + extract insights"** — runs `npm run session:score && npm run self:extract-insights` (full pipeline)
+   - **"Skip, jump into work"** — proceed without self-improvement
+
+2. **If the user chooses to score/extract**, run the commands via Bash and briefly report results.
+
+3. **If no `<pending-self-improvement>` block appears**, there is nothing pending — proceed normally.
+
+### Important
+- **Always optional** — never run scoring/insights without user approval
+- If the user's first message is clearly task-focused, default to skip
+- The user can always run these manually later: `npm run session:score`, `npm run self:extract-insights`
+
 ## Problem-Solving Approach (OODA Loop)
 
 Follow this approach for EVERY non-trivial task:

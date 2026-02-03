@@ -37,6 +37,63 @@ cp .mcp.json.example .mcp.json
 
 **Note:** LLM tasks (scoring, insight extraction, reflections) use Claude CLI for speed. Ollama is only used for embeddings.
 
+## Using as a Starter Template
+
+This workspace is designed as a foundation for your own private AI workspace. Create your own repository and keep this starter as an upstream remote to pull future improvements.
+
+### Initial Setup
+
+```bash
+# 1. Clone the starter
+git clone https://github.com/theJohnHarbison/starter-ai-workspace.git ai-workspace
+cd ai-workspace
+
+# 2. Create your own private repository on GitHub
+gh repo create my-ai-workspace --private
+
+# 3. Change origin to your private repo
+git remote set-url origin https://github.com/YOUR_USERNAME/my-ai-workspace.git
+
+# 4. Add the starter as upstream
+git remote add upstream https://github.com/theJohnHarbison/starter-ai-workspace.git
+
+# 5. Push to your private repo
+git push -u origin main
+
+# 6. Continue with Quick Setup steps above (npm install, docker-compose, etc.)
+```
+
+### Pulling Upstream Improvements
+
+When the starter template gets updates:
+
+```bash
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+### Contributing Back
+
+If you develop generic improvements that would benefit all starter users:
+
+```bash
+# Create a branch from upstream
+git fetch upstream
+git checkout -b feat/your-improvement upstream/main
+
+# Make changes (only generic, non-private content)
+git commit -m "feat: description"
+git push origin feat/your-improvement
+
+# Create PR against the starter
+gh pr create --repo theJohnHarbison/starter-ai-workspace \
+  --head YOUR_USERNAME:feat/your-improvement \
+  --base main --title "feat: your improvement"
+```
+
+See [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) for the full branching strategy and safety guidelines.
+
 ## Session Memory System
 
 The workspace automatically embeds Claude Code sessions for semantic search. This lets you find past solutions, patterns, and decisions.
@@ -190,9 +247,8 @@ All LLM tasks use **Claude CLI** for speed (Ollama only handles embeddings):
 ### Auto-Running Behavior
 
 The system runs automatically via hooks:
-- **Session end** (`/clear`): Embeds and scores current session chunks immediately
-- **Session exit** (`/exit`): Marks unscored chunks as "pending" for fast exit
-- **Session start**: Scores any pending chunks from previous sessions
+- **Session end** (`/clear` or `/exit`): Embeds session and marks chunks as pending (fast, non-blocking)
+- **Session start**: Checks for pending work and reports status — Claude offers interactive scoring/insight options
 - **Mode**: `autonomous` (auto-commits rules), `supervised` (proposes only), or `manual`
 - **Safety**: All changes are atomic git commits, revertable with `git revert <hash>`
 

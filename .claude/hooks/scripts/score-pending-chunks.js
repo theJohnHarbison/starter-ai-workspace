@@ -1,76 +1,85 @@
 #!/usr/bin/env node
 /**
- * Score pending chunks on session start.
+ * Check pending self-improvement work on session start.
  *
- * Checks for chunks marked as pending_score (from previous interrupted sessions)
- * and scores them using Claude CLI.
+ * Queries Qdrant for pending chunks and scored chunk counts, then outputs
+ * a <pending-self-improvement> block describing what's available.
+ * Claude reads this and offers the user a choice via AskUserQuestion.
  *
+ * This hook does NOT execute any work — it only reports status.
  * Called from SessionStart hook.
  */
-
-const { execSync } = require('child_process');
-const path = require('path');
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const COLLECTION_NAME = 'session-embeddings';
 
-async function checkPendingChunks() {
+async function qdrantCount(filter) {
+  const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/count`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filter, exact: true }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!response.ok) return 0;
+  const data = await response.json();
+  return data.result?.count || 0;
+}
+
+async function checkPendingWork() {
   try {
     // Check if Qdrant is available
-    const healthCheck = await fetch(`${QDRANT_URL}/health`);
+    const healthCheck = await fetch(`${QDRANT_URL}/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
     if (!healthCheck.ok) return;
 
-    // Check for pending chunks
-    const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: 1,
-        filter: {
-          must: [{ key: 'pending_score', match: { value: true } }]
-        }
+    // Run all three count queries in parallel
+    const [pendingCount, highQualityCount, lowQualityCount] = await Promise.all([
+      // 1. Pending (unscored) chunks
+      qdrantCount({
+        must: [{ key: 'pending_score', match: { value: true } }],
       }),
-    });
+      // 2. High-quality scored chunks (score >= 7)
+      qdrantCount({
+        must: [{ key: 'quality_score', range: { gte: 7 } }],
+      }),
+      // 3. Low-quality scored chunks (score <= 3)
+      qdrantCount({
+        must: [{ key: 'quality_score', range: { lte: 3 } }],
+      }),
+    ]);
 
-    if (!response.ok) return;
+    // Nothing to report
+    const insightAvailable = highQualityCount >= 3 && lowQualityCount >= 3;
+    if (pendingCount === 0 && !insightAvailable) return;
 
-    const data = await response.json();
-    const pendingCount = data.result?.points?.length || 0;
+    // Estimate scoring time (~2 sec per chunk, batched)
+    const scoringMinutes = Math.max(1, Math.ceil((pendingCount * 2) / 60));
+    const scoringEstimate = `~${scoringMinutes}-${scoringMinutes + 2} min`;
+
+    // Build output block
+    const lines = ['<pending-self-improvement>'];
 
     if (pendingCount > 0) {
-      // There are pending chunks - run the scorer in background
-      console.log(`[session-start] Found pending chunks, scoring in background...`);
-
-      // Run scorer for pending chunks only
-      const workspaceRoot = findWorkspaceRoot();
-      execSync(
-        `npx ts-node "${path.join(workspaceRoot, 'scripts/session-embedder/quality-scorer.ts')}" --pending-only`,
-        {
-          cwd: workspaceRoot,
-          stdio: 'inherit',
-          timeout: 300000, // 5 minute timeout
-        }
-      );
+      lines.push(`Pending scoring: ${pendingCount} chunks (${scoringEstimate})`);
     }
-  } catch (error) {
+
+    if (insightAvailable) {
+      lines.push(`Insight extraction ready: ${highQualityCount} high-quality + ${lowQualityCount} low-quality chunks (~3-5 min)`);
+    }
+
+    if (pendingCount > 0 && insightAvailable) {
+      lines.push(`Full pipeline (score + extract): ~${scoringMinutes + 3}-${scoringMinutes + 5} min`);
+    }
+
+    lines.push('</pending-self-improvement>');
+    console.log(lines.join('\n'));
+  } catch {
     // Silently fail - don't disrupt session start
   }
 }
 
-function findWorkspaceRoot() {
-  let current = process.cwd();
-  const fs = require('fs');
-
-  for (let i = 0; i < 15; i++) {
-    if (fs.existsSync(path.join(current, '.claude'))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return process.cwd();
-}
-
-checkPendingChunks().then(() => {
+checkPendingWork().then(() => {
   process.exit(0);
 }).catch(() => {
   process.exit(0);
