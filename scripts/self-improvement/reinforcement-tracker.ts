@@ -43,6 +43,7 @@ function loadConfig(): Config {
  * for conceptual matches and increment reinforcement count.
  */
 export async function trackReinforcement(): Promise<void> {
+  const config = loadConfig();
   const rules = loadRules();
   const activeRules = rules.filter(r => r.status === 'active');
 
@@ -58,20 +59,26 @@ export async function trackReinforcement(): Promise<void> {
     return;
   }
 
+  const windowDays = config.reinforcementWindowDays ?? 30;
+  const scoreThreshold = config.reinforcementScoreThreshold ?? 0.55;
+  const qualityMin = config.reinforcementQualityMin ?? 4;
+  const searchLimit = config.reinforcementSearchLimit ?? 10;
+
   console.log(`Tracking reinforcement for ${activeRules.length} active rule(s)...`);
+  console.log(`  Config: window=${windowDays}d, score>=${scoreThreshold}, quality>=${qualityMin}, limit=${searchLimit}`);
 
   let updated = 0;
   for (const rule of activeRules) {
     const embedding = await embed(rule.text);
-    const results = await qdrant.searchSessions(embedding, 5, { min: 6 });
+    const results = await qdrant.searchSessions(embedding, searchLimit, { min: qualityMin });
 
-    // Count recent matches (last 7 days) that aren't from the rule's source sessions
+    // Count recent matches that aren't from the rule's source sessions
     const recentMatches = results.filter(r => {
       const date = r.payload.date as string;
       if (!date) return false;
       const daysSince = (Date.now() - new Date(date).getTime()) / 86400000;
       const sessionId = r.payload.session_id as string;
-      return daysSince <= 7 && !rule.sourceSessionIds.includes(sessionId) && r.score >= 0.7;
+      return daysSince <= windowDays && !rule.sourceSessionIds.includes(sessionId) && r.score >= scoreThreshold;
     });
 
     if (recentMatches.length > 0) {

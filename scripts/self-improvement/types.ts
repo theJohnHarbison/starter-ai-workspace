@@ -54,4 +54,8 @@ export interface Config {
   qualityThresholdSuccess: number;
   qualityThresholdFailure: number;
   deduplicationSimilarity: number;
+  reinforcementWindowDays?: number;
+  reinforcementScoreThreshold?: number;
+  reinforcementQualityMin?: number;
+  reinforcementSearchLimit?: number;
 }
