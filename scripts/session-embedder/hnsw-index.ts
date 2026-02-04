@@ -51,7 +51,7 @@ function findWorkspaceRoot(): string {
 }
 
 export interface HNSWConfig {
-  dimensions: number;       // Vector dimensions (768 for nomic-embed-text)
+  dimensions: number;       // Vector dimensions (384 for bge-small-en-v1.5)
   maxElements: number;      // Maximum number of elements
   efConstruction: number;   // Size of dynamic list during construction (higher = better quality, slower build)
   M: number;                // Number of bi-directional links per node (higher = better recall, more memory)
@@ -64,9 +64,9 @@ export interface SearchResult {
   score: number;  // Converted to similarity score (1 - distance for cosine)
 }
 
-// Default config optimized for 768-dimensional embeddings
+// Default config optimized for 384-dimensional embeddings
 const DEFAULT_CONFIG: HNSWConfig = {
-  dimensions: 768,
+  dimensions: 384,
   maxElements: 100000,      // Support up to 100K chunks
   efConstruction: 200,      // Good quality for index building
   M: 16,                    // Standard value for 768 dimensions

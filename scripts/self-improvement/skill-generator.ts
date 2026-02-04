@@ -19,7 +19,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { SkillCandidate, Config } from './types';
 import * as claude from './claude-client';
-import * as ollama from './ollama-client'; // For embeddings only
+import { embed } from '../shared/embedder';
 import * as qdrant from './qdrant-client';
 
 function findWorkspaceRoot(): string {
@@ -106,7 +106,7 @@ export async function checkAndProposeSkill(sessionPath: string): Promise<SkillCa
   const summary = await summarizeSession(sessionPath);
   if (!summary || summary.length < 20) return null;
 
-  const summaryEmbedding = await ollama.embed(summary);
+  const summaryEmbedding = await embed(summary);
   const similar = await qdrant.searchSessions(summaryEmbedding, 3);
 
   // Check novelty: if top results are too similar, it's not novel

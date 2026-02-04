@@ -12,11 +12,11 @@ cd ai-workspace
 # 2. Install dependencies
 npm install
 
-# 3. Start Docker services (Ollama + Qdrant)
+# 3. Start Docker services (Qdrant)
 docker-compose up -d
 
-# 4. Pull required models
-npm run setup:models
+# 4. Embed sessions (downloads embedding model on first run)
+npm run session:embed
 
 # 5. Verify setup
 npm run session:stats
@@ -32,10 +32,9 @@ cp .mcp.json.example .mcp.json
 **Services started by docker-compose:**
 | Service | Purpose | URL |
 |---------|---------|-----|
-| Ollama | Embeddings (`nomic-embed-text`) for session memory | http://localhost:11434 |
 | Qdrant | Vector database for session memory | http://localhost:6333 |
 
-**Note:** LLM tasks (scoring, insight extraction, reflections) use Claude CLI for speed. Ollama is only used for embeddings.
+Embeddings are generated locally using `@huggingface/transformers` with `bge-small-en-v1.5` (384-dim). The model auto-downloads (~130MB) on first use. LLM tasks (scoring, insight extraction, reflections) use Claude CLI.
 
 ## Using as a Starter Template
 
@@ -143,12 +142,12 @@ ai-workspace/
 ├── scripts/
 │   ├── session-embedder/   # Session embedding system
 │   ├── self-improvement/   # Self-improvement system (ExpeL-based)
-│   ├── setup-models.js     # Pull required Ollama models
+│   ├── shared/             # Shared modules (embedder)
 │   ├── add-project         # Add projects (bash)
 │   ├── add-example         # Add examples (bash)
 │   ├── list-projects       # List projects (bash)
 │   └── install-skills.*    # Install community skills
-└── docker-compose.yml      # Ollama + Qdrant services
+└── docker-compose.yml      # Qdrant service
 ```
 
 ## Knowledge Graph Visualization
@@ -189,8 +188,7 @@ The topic map is also automatically regenerated after each `npm run session:embe
 
 | Script | Description |
 |--------|-------------|
-| `npm run setup:models` | Pull required Ollama models |
-| `npm run session:embed` | Embed new sessions into vector store |
+| `npm run session:embed` | Embed sessions + run self-improvement pipeline |
 | `npm run session:search "query"` | Basic semantic search |
 | `npm run hybrid:search "query"` | Semantic + entity search (recommended) |
 | `npm run tiered:search "query"` | Recency-weighted search |
@@ -237,18 +235,20 @@ The workspace includes an autonomous self-improvement loop inspired by ExpeL, Vo
 
 ### How It Works
 
-All LLM tasks use **Claude CLI** for speed (Ollama only handles embeddings):
+All LLM tasks use **Claude CLI**. Embeddings run locally via `@huggingface/transformers` (`bge-small-en-v1.5`).
 
-1. **Session Scoring** - Chunks scored by quality using Claude CLI (batched, with pre-filtering)
-2. **Insight Extraction** - Compares successful vs unsuccessful patterns using Claude CLI
-3. **Reflection Generation** - Analyzes failures using Claude CLI to generate improvement reflections
-4. **Rule Management** - Auto-applies proven rules, prunes stale ones (60-day threshold)
+The full pipeline is consolidated into `npm run session:embed`:
+1. **Embed** - Chunk and embed sessions into Qdrant
+2. **Score** - Score chunks by quality using Claude CLI
+3. **Extract Insights** - Compare successful vs unsuccessful patterns
+4. **Generate Reflections** - Analyze failures for improvement reflections
+5. **Track Skills** - Identify novel skill candidates
+6. **Reinforce/Prune** - Track rule reinforcements, prune stale rules (60-day threshold)
 
-### Auto-Running Behavior
+Use `npm run session:embed -- --embed-only` to skip the self-improvement steps.
 
-The system runs automatically via hooks:
-- **Session end** (`/clear` or `/exit`): Embeds session and marks chunks as pending (fast, non-blocking)
-- **Session start**: Checks for pending work and reports status — Claude offers interactive scoring/insight options
+### Behavior
+
 - **Mode**: `autonomous` (auto-commits rules), `supervised` (proposes only), or `manual`
 - **Safety**: All changes are atomic git commits, revertable with `git revert <hash>`
 
@@ -351,7 +351,6 @@ To enable GitHub MCP (issues, PRs, code search):
 |--------|---------|----------------|
 | `github` | GitHub issues, PRs, code search | Yes (PAT) |
 | `chrome-devtools` | Browser automation | No |
-| `ollama` | Local LLM inference | No |
 
 **Important:** `.mcp.json` contains secrets and is gitignored. Never commit tokens.
 
@@ -400,11 +399,6 @@ If you add new skills (`.claude/skills/`) or hooks (`.claude/hooks/`), include a
 docker-compose ps        # Check status
 docker-compose logs -f   # View logs
 docker-compose up -d     # Restart
-```
-
-**Models missing:**
-```bash
-npm run setup:models
 ```
 
 **Dependencies missing:**

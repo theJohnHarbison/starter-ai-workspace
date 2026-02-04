@@ -39,11 +39,6 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/skill-suggest.js",
             "timeout": 1000
-          },
-          {
-            "type": "command",
-            "command": "node .claude/hooks/scripts/session-memory-lookup.js",
-            "timeout": 5000
           }
         ]
       }
@@ -56,11 +51,6 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/log-session-start.js",
             "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "node .claude/hooks/scripts/score-pending-chunks.js",
-            "timeout": 10000
           }
         ]
       }
@@ -89,16 +79,6 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/export-conversation.js",
             "timeout": 10000
-          },
-          {
-            "type": "command",
-            "command": "node .claude/hooks/scripts/score-session-chunks.js",
-            "timeout": 30000
-          },
-          {
-            "type": "command",
-            "command": "npx ts-node scripts/self-improvement/on-session-end.ts",
-            "timeout": 30000
           }
         ]
       }

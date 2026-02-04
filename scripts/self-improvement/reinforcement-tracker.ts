@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Rule, Config } from './types';
-import * as ollama from './ollama-client';
+import { embed } from '../shared/embedder';
 import * as qdrant from './qdrant-client';
 import { loadRules, saveRules, writeRulesToClaudeMd } from './proposal-manager';
 import { execSync } from 'child_process';
@@ -51,11 +51,10 @@ export async function trackReinforcement(): Promise<void> {
     return;
   }
 
-  const ollamaOk = await ollama.isOllamaAvailable();
   const qdrantOk = await qdrant.isQdrantAvailable();
 
-  if (!ollamaOk || !qdrantOk) {
-    console.error('Ollama or Qdrant not available.');
+  if (!qdrantOk) {
+    console.error('Qdrant not available.');
     return;
   }
 
@@ -63,7 +62,7 @@ export async function trackReinforcement(): Promise<void> {
 
   let updated = 0;
   for (const rule of activeRules) {
-    const embedding = await ollama.embed(rule.text);
+    const embedding = await embed(rule.text);
     const results = await qdrant.searchSessions(embedding, 5, { min: 6 });
 
     // Count recent matches (last 7 days) that aren't from the rule's source sessions

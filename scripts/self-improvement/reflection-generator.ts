@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Reflection } from './types';
 import * as claude from './claude-client';
-import * as ollama from './ollama-client';
+import { embed } from '../shared/embedder';
 import * as qdrant from './qdrant-client';
 import { addRule } from './proposal-manager';
 
@@ -206,10 +206,10 @@ export async function processSession(sessionPath: string): Promise<number> {
     const reflection = reflections[i];
     if (!reflection) continue;
 
-    // Embed and store the reflection (using Ollama for embeddings - it's fast)
+    // Embed and store the reflection
     const reflectionText = `${reflection.failure_description} | ${reflection.root_cause} | ${reflection.reflection}`;
     try {
-      const embedding = await ollama.embed(reflectionText);
+      const embedding = await embed(reflectionText);
       await qdrant.storeReflection(
         `reflection-${sessionId}-${stored}`,
         embedding,
@@ -240,13 +240,6 @@ export async function generateReflectionsFromSessions(sessionPath?: string): Pro
   const claudeOk = await claude.isClaudeAvailable();
   if (!claudeOk) {
     console.error('Claude CLI is not available.');
-    return 0;
-  }
-
-  // Ollama still needed for embeddings
-  const ollamaOk = await ollama.isOllamaAvailable();
-  if (!ollamaOk) {
-    console.error('Ollama is not available (needed for embeddings).');
     return 0;
   }
 

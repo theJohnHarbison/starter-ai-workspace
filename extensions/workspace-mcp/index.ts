@@ -10,7 +10,6 @@
  * - session-search: Search past sessions semantically
  * - knowledge-query: Query the knowledge graph
  * - role-recommend: Get role recommendations for a task
- * - ollama-qwen: Query Qwen2.5-Coder for code generation and analysis
  *
  * Usage:
  *   Add to .mcp.json:
@@ -36,14 +35,12 @@ import {
 import { sessionSearchTool, executeSessionSearch } from './tools/session-search.js';
 import { knowledgeQueryTool, executeKnowledgeQuery } from './tools/knowledge-query.js';
 import { roleRecommendTool, executeRoleRecommend } from './tools/role-recommend.js';
-import { ollamaQwenTool, executeOllamaQwen } from './tools/ollama-qwen.js';
 
 // Define available tools
 const TOOLS: Tool[] = [
   sessionSearchTool,
   knowledgeQueryTool,
   roleRecommendTool,
-  ollamaQwenTool,
 ];
 
 // Tool execution handlers
@@ -51,7 +48,6 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<s
   'session-search': executeSessionSearch,
   'knowledge-query': executeKnowledgeQuery,
   'role-recommend': executeRoleRecommend,
-  'ollama-qwen': executeOllamaQwen,
 };
 
 async function main() {

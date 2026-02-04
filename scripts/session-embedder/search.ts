@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Ollama } from 'ollama';
+import { embed } from '../shared/embedder';
 import { QdrantVectorStore } from './qdrant-store';
 
 function logSearch(source: string, query: string, resultsCount: number, topScore: number, topSessionId: string, durationMs: number) {
@@ -13,22 +13,13 @@ function logSearch(source: string, query: string, resultsCount: number, topScore
   } catch {}
 }
 
-const OLLAMA_MODEL = 'nomic-embed-text';
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
-
 async function search(query: string, topK: number = 5) {
   const startTime = Date.now();
   console.log(`Searching for: "${query}"\n`);
 
-  const ollama = new Ollama({ host: OLLAMA_HOST });
   const vectorStore = new QdrantVectorStore();
 
-  const response = await ollama.embeddings({
-    model: OLLAMA_MODEL,
-    prompt: query,
-  });
-
-  const queryEmbedding = response.embedding;
+  const queryEmbedding = await embed(query);
 
   const results = await vectorStore.search(queryEmbedding, topK);
 

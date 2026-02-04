@@ -17,15 +17,6 @@
         "GITHUB_TOOLSETS": "repos,issues,pull_requests,actions,code_security,experiments,projects,context"
       }
     },
-    "ollama": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "ollama-mcp@latest"
-      ]
-    },
     "chrome-devtools": {
       "command": "cmd",
       "args": [

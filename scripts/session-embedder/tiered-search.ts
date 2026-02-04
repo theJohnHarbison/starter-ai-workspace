@@ -17,11 +17,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Ollama } from 'ollama';
+import { embed } from '../shared/embedder';
 import { QdrantVectorStore } from './qdrant-store';
-
-const OLLAMA_MODEL = 'nomic-embed-text';
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 
 /**
  * Find workspace root by looking for .claude directory
@@ -140,16 +137,10 @@ async function tieredSearch(query: string, options: SearchOptions): Promise<void
   const searchStart = Date.now();
   console.log(`\n🔍 Searching for: "${query}"\n`);
 
-  const ollama = new Ollama({ host: OLLAMA_HOST });
   const vectorStore = new QdrantVectorStore();
 
   // Generate query embedding
-  const response = await ollama.embeddings({
-    model: OLLAMA_MODEL,
-    prompt: query,
-  });
-
-  const queryEmbedding = response.embedding;
+  const queryEmbedding = await embed(query);
 
   // Search vector store (returns more results than needed for tier filtering)
   const qdrantResults = await vectorStore.search(queryEmbedding, options.topK * 3);

@@ -6,7 +6,7 @@
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const REFLECTIONS_COLLECTION = 'reflections';
 const SESSIONS_COLLECTION = 'session-embeddings';
-const VECTOR_SIZE = 768;
+const VECTOR_SIZE = 384;
 
 /**
  * Ensure a Qdrant collection exists, creating it if needed.
