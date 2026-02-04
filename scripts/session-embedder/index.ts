@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Ollama } from 'ollama';
+import { embed } from '../shared/embedder';
 import { SessionChunker } from './chunker';
 import { VectorEntry } from './vector-store';
 import { QdrantVectorStore } from './qdrant-store';
@@ -8,8 +8,6 @@ import { QdrantBackupManager } from './qdrant-backup';
 import { generateTopicMap } from './topic-map';
 import chalk from 'chalk';
 
-const OLLAMA_MODEL = 'nomic-embed-text';
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const DEFAULT_BACKUP_PATH = process.env.EMBEDDING_BACKUP_PATH || './backups';
 
 /**
@@ -120,28 +118,16 @@ class ProgressTracker {
 }
 
 export class SessionEmbedder {
-  private ollama: Ollama;
   private chunker: SessionChunker;
   private vectorStore: QdrantVectorStore;
 
   constructor() {
-    this.ollama = new Ollama({ host: OLLAMA_HOST });
     this.chunker = new SessionChunker();
     this.vectorStore = new QdrantVectorStore();
   }
 
   async embedText(text: string): Promise<number[]> {
-    try {
-      const response = await this.ollama.embeddings({
-        model: OLLAMA_MODEL,
-        prompt: text,
-      });
-
-      return response.embedding;
-    } catch (error) {
-      console.error('Error generating embedding:', error);
-      throw error;
-    }
+    return embed(text);
   }
 
   async embedSession(sessionPath: string): Promise<void> {
@@ -301,6 +287,128 @@ export class SessionEmbedder {
   }
 }
 
+/**
+ * Run the self-improvement pipeline after embedding.
+ * Each step is wrapped in try/catch so failures don't block subsequent steps.
+ */
+async function runSelfImprovementPipeline(): Promise<void> {
+  console.log(chalk.cyan('\n' + '='.repeat(65)));
+  console.log(chalk.cyan.bold('  Self-Improvement Pipeline'));
+  console.log(chalk.cyan('='.repeat(65) + '\n'));
+
+  const summary: Array<{ step: string; result: string }> = [];
+
+  // Step 1: Score new chunks
+  try {
+    console.log(chalk.blue('Step 1/6: Scoring new chunks...'));
+    const { getPointsToScore, preFilterScore, scoreBatchWithClaude } = await import('./quality-scorer');
+    const points = await getPointsToScore({});
+    if (points.length > 0) {
+      let preFiltered = 0;
+      let needsLLM = 0;
+      for (const point of points) {
+        const chunkText = (point.payload.chunk_text as string) || '';
+        const score = preFilterScore(chunkText);
+        if (score !== null) {
+          preFiltered++;
+        } else {
+          needsLLM++;
+        }
+      }
+      summary.push({ step: 'Score chunks', result: `${points.length} chunks (${preFiltered} pre-filtered, ${needsLLM} need LLM)` });
+      console.log(chalk.green(`   Found ${points.length} chunks to score (${preFiltered} pre-filtered)`));
+    } else {
+      summary.push({ step: 'Score chunks', result: 'All scored' });
+      console.log(chalk.gray('   All chunks already scored'));
+    }
+  } catch (err) {
+    summary.push({ step: 'Score chunks', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 2: Extract insights
+  try {
+    console.log(chalk.blue('\nStep 2/6: Extracting insights...'));
+    const { extractInsights } = await import('../self-improvement/insight-extractor');
+    const insightCount = await extractInsights();
+    summary.push({ step: 'Extract insights', result: `${insightCount} insight(s)` });
+    console.log(chalk.green(`   Extracted ${insightCount} insight(s)`));
+  } catch (err) {
+    summary.push({ step: 'Extract insights', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 3: Generate reflections
+  try {
+    console.log(chalk.blue('\nStep 3/6: Generating reflections...'));
+    const { generateReflectionsFromSessions } = await import('../self-improvement/reflection-generator');
+    const reflectionCount = await generateReflectionsFromSessions();
+    summary.push({ step: 'Generate reflections', result: `${reflectionCount} reflection(s)` });
+    console.log(chalk.green(`   Generated ${reflectionCount} reflection(s)`));
+  } catch (err) {
+    summary.push({ step: 'Generate reflections', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 4: Check for novel skills
+  try {
+    console.log(chalk.blue('\nStep 4/6: Checking for novel skills...'));
+    const sessionsDir = path.join(getWorkspaceRoot(), '.claude/logs/sessions');
+    if (fs.existsSync(sessionsDir)) {
+      const { checkAndProposeSkill } = await import('../self-improvement/skill-generator');
+      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+      let proposed = 0;
+      for (const file of files) {
+        try {
+          const result = await checkAndProposeSkill(path.join(sessionsDir, file));
+          if (result) proposed++;
+        } catch { /* continue */ }
+      }
+      summary.push({ step: 'Propose skills', result: `${proposed} proposed` });
+      console.log(chalk.green(`   Proposed ${proposed} skill(s)`));
+    } else {
+      summary.push({ step: 'Propose skills', result: 'No sessions dir' });
+      console.log(chalk.gray('   No sessions directory'));
+    }
+  } catch (err) {
+    summary.push({ step: 'Propose skills', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 5: Track reinforcements
+  try {
+    console.log(chalk.blue('\nStep 5/6: Tracking reinforcements...'));
+    const { trackReinforcement } = await import('../self-improvement/reinforcement-tracker');
+    await trackReinforcement();
+    summary.push({ step: 'Reinforcement', result: 'Done' });
+    console.log(chalk.green('   Done'));
+  } catch (err) {
+    summary.push({ step: 'Reinforcement', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 6: Prune stale rules
+  try {
+    console.log(chalk.blue('\nStep 6/6: Pruning stale rules...'));
+    const { pruneStaleRules } = await import('../self-improvement/reinforcement-tracker');
+    const { pruned, flagged } = pruneStaleRules();
+    summary.push({ step: 'Prune rules', result: `${pruned} pruned, ${flagged} flagged` });
+    console.log(chalk.green(`   Pruned ${pruned}, flagged ${flagged}`));
+  } catch (err) {
+    summary.push({ step: 'Prune rules', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Print summary
+  console.log(chalk.cyan('\n' + '='.repeat(65)));
+  console.log(chalk.cyan.bold('  Pipeline Summary'));
+  console.log(chalk.cyan('='.repeat(65)));
+  for (const { step, result } of summary) {
+    console.log(`  ${chalk.bold(step.padEnd(22))} ${result}`);
+  }
+  console.log('');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -310,18 +418,24 @@ async function main() {
 
   if (command === 'embed') {
     const sessionPath = args[1];
-    const doBackup = args.includes('--backup');
+    const skipBackup = args.includes('--no-backup');
+    const embedOnly = args.includes('--embed-only');
 
     if (!sessionPath || sessionPath.startsWith('--')) {
       const defaultPath = path.join(WORKSPACE_ROOT, '.claude', 'logs', 'sessions');
-      await embedder.embedSessionsInDirectory(defaultPath, doBackup ? backupPath : undefined);
+      await embedder.embedSessionsInDirectory(defaultPath, skipBackup ? undefined : backupPath);
     } else if (fs.existsSync(sessionPath) && fs.statSync(sessionPath).isDirectory()) {
-      await embedder.embedSessionsInDirectory(sessionPath, doBackup ? backupPath : undefined);
+      await embedder.embedSessionsInDirectory(sessionPath, skipBackup ? undefined : backupPath);
     } else if (fs.existsSync(sessionPath)) {
       await embedder.embedSession(sessionPath);
     } else {
       console.error(`Error: Path not found: ${sessionPath}`);
       process.exit(1);
+    }
+
+    // Run self-improvement pipeline unless --embed-only
+    if (!embedOnly) {
+      await runSelfImprovementPipeline();
     }
   } else if (command === 'stats') {
     const vectorStore = new QdrantVectorStore();
@@ -336,16 +450,21 @@ async function main() {
       console.log(`  Status: ${stats.qdrant_status}`);
     }
   } else {
-    console.log('Session Embedder');
+    console.log('Session Embedder + Self-Improvement Pipeline');
     console.log('');
     console.log('Usage:');
-    console.log('  npm run embed                    - Embed all sessions');
-    console.log('  npm run embed <dir>              - Embed all sessions in directory');
-    console.log('  npm run embed <session.json>     - Embed single session');
-    console.log('  npm run embed stats              - Show vector store statistics');
+    console.log('  npm run session:embed                    - Embed + full self-improvement pipeline');
+    console.log('  npm run session:embed -- --embed-only    - Embed only, skip self-improvement');
+    console.log('  npm run session:embed -- --no-backup     - Skip backup step');
+    console.log('  npm run session:stats                    - Show vector store statistics');
     console.log('');
-    console.log('Options:');
-    console.log('  --backup                         - Backup vector store after embedding');
+    console.log('Pipeline steps (after embedding):');
+    console.log('  1. Score new chunks (heuristic + Claude CLI)');
+    console.log('  2. Extract insights from session pairs');
+    console.log('  3. Generate reflections from failures');
+    console.log('  4. Check for novel skills');
+    console.log('  5. Track rule reinforcements');
+    console.log('  6. Prune stale rules');
     console.log('');
     console.log('Environment:');
     console.log(`  EMBEDDING_BACKUP_PATH            - Custom backup path (default: ${DEFAULT_BACKUP_PATH})`);

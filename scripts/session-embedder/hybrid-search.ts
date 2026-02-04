@@ -17,12 +17,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Ollama } from 'ollama';
+import { embed } from '../shared/embedder';
 import { QdrantVectorStore } from './qdrant-store';
 import { EntityExtractor, Entity } from './entity-extractor';
-
-const OLLAMA_MODEL = 'nomic-embed-text';
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 
 export type MemoryTier = 'working' | 'episodic' | 'semantic' | 'resource';
 
@@ -137,12 +134,10 @@ const DEFAULT_OPTIONS: HybridSearchOptions = {
 };
 
 export class HybridSearchEngine {
-  private ollama: Ollama;
   private vectorStore: QdrantVectorStore;
   private extractor: EntityExtractor;
 
   constructor() {
-    this.ollama = new Ollama({ host: OLLAMA_HOST });
     this.vectorStore = new QdrantVectorStore();
     this.extractor = new EntityExtractor();
   }
@@ -154,11 +149,7 @@ export class HybridSearchEngine {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
     // Step 1: Generate query embedding
-    const embeddingResponse = await this.ollama.embeddings({
-      model: OLLAMA_MODEL,
-      prompt: query,
-    });
-    const queryEmbedding = embeddingResponse.embedding;
+    const queryEmbedding = await embed(query);
 
     // Step 2: Semantic search via Qdrant
     const semanticResults = await this.vectorStore.search(queryEmbedding, opts.topK * 3);

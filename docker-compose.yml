@@ -1,24 +1,4 @@
 services:
-  # Ollama - Local embedding model server
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      # GPU support (optional, remove if no GPU)
-      - CUDA_VISIBLE_DEVICES=0
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - workspace
-
   # Qdrant - Vector database for session embeddings
   qdrant:
     image: qdrant/qdrant:latest
@@ -38,12 +18,8 @@ services:
     restart: unless-stopped
     networks:
       - workspace
-    depends_on:
-      - ollama
 
 volumes:
-  ollama_data:
-    name: ollama_data
   qdrant_data:
     name: qdrant_data
 
@@ -56,9 +32,7 @@ networks:
 # Start services:     docker-compose up -d
 # View logs:          docker-compose logs -f
 # Check status:       docker-compose ps
-# Pull Ollama model:  docker-compose exec ollama ollama pull <model-name>
-# Check models:       docker-compose exec ollama ollama list
-# Shell access:       docker-compose exec <service> bash
+# Shell access:       docker-compose exec qdrant bash
 #
 # ⚠️  IMPORTANT: Qdrant stores your session embeddings
 #     - Do NOT use 'docker-compose down' without backup

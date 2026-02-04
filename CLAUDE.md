@@ -17,11 +17,11 @@ For complete step-by-step instructions, see **[README.md](README.md)**.
 # 1. Install Node.js dependencies
 npm install
 
-# 2. Start Docker services (Ollama + Qdrant)
+# 2. Start Docker services (Qdrant)
 docker-compose up -d
 
-# 3. Pull required models
-npm run setup:models
+# 3. Embed sessions (downloads embedding model on first run)
+npm run session:embed
 
 # 4. Verify everything is working
 npm run session:stats
@@ -30,23 +30,24 @@ npm run session:stats
 ### Verify Setup Success
 
 ```bash
-docker-compose ps           # Shows ollama and qdrant as "Up"
+docker-compose ps           # Shows qdrant as "Up"
 npm run session:stats       # Shows vector store statistics
 ```
 
 ### Infrastructure Services
 
-This workspace requires and automatically starts:
+This workspace requires:
 
 | Service | Purpose | URL | Port |
 |---------|---------|-----|------|
-| **Ollama** | Embeddings (`nomic-embed-text`) for session memory | http://localhost:11434 | 11434 |
 | **Qdrant** | Vector database for session embeddings | http://localhost:6333 | 6333 |
 
-Start/stop all services with:
+Embeddings are generated locally using `@huggingface/transformers` with `bge-small-en-v1.5` (384-dim). The model auto-downloads (~130MB) on first use.
+
+Start/stop services with:
 ```bash
-docker-compose up -d      # Start all services
-docker-compose down       # Stop all services
+docker-compose up -d      # Start Qdrant
+docker-compose down       # Stop Qdrant
 docker-compose logs -f    # View service logs
 ```
 
@@ -57,8 +58,6 @@ docker-compose logs -f    # View service logs
 You are working in a structured workspace with specialized tools and skills designed for collaborative development. See `README.md` and `docs/` for comprehensive guidance.
 
 **Important**: Skills are auto-loaded from `.claude/skills/` based on context.
-
-**Note**: Ollama is used only for embeddings. All LLM tasks (scoring, insights, validation) use Claude CLI.
 
 ## Security & Configuration
 - **`.mcp.json`**: Contains authentication tokens - NEVER commit to git
@@ -137,28 +136,6 @@ npm run tiered:search "architecture decision for X"
 ```
 
 Sessions are automatically embedded when you run `npm run session:embed`.
-
-## Interactive Self-Improvement on Session Start
-
-When a session starts, a hook checks for pending self-improvement work and may output a `<pending-self-improvement>` block in the session context. This describes deferred scoring and insight extraction from previous sessions.
-
-### How to Handle
-
-When you see `<pending-self-improvement>`:
-
-1. **Use AskUserQuestion** to offer the user a choice:
-   - **"Score pending sessions"** — runs `npm run session:score` (time estimate shown in the block)
-   - **"Score + extract insights"** — runs `npm run session:score && npm run self:extract-insights` (full pipeline)
-   - **"Skip, jump into work"** — proceed without self-improvement
-
-2. **If the user chooses to score/extract**, run the commands via Bash and briefly report results.
-
-3. **If no `<pending-self-improvement>` block appears**, there is nothing pending — proceed normally.
-
-### Important
-- **Always optional** — never run scoring/insights without user approval
-- If the user's first message is clearly task-focused, default to skip
-- The user can always run these manually later: `npm run session:score`, `npm run self:extract-insights`
 
 ## Problem-Solving Approach (OODA Loop)
 
@@ -314,7 +291,6 @@ ai-workspace/
 │   └── _tasks/                     # Project task tracking
 │       └── [project-name]/         # Tasks for specific projects
 ├── docs/                           # Essential reference docs ONLY
-│   ├── OLLAMA_WORKFLOW.md          # Local LLM usage guide
 │   └── projects/<project>/         # Project-specific docs
 ├── extensions/                     # MCP server configurations
 ├── scripts/
@@ -403,7 +379,7 @@ The workspace uses an **embedding-based session memory** system with Qdrant vect
 ### How It Works
 
 1. **Session Export**: Claude Code exports session JSON to `.claude/logs/sessions/`
-2. **Embedding**: Sessions are chunked and embedded using Ollama's `nomic-embed-text` model
+2. **Embedding**: Sessions are chunked and embedded using `@huggingface/transformers` with `bge-small-en-v1.5` (384-dim, runs locally in Node.js)
 3. **Storage**: Vectors stored in Qdrant vector database
 4. **Search**: Multiple search modes available for different use cases
 
@@ -430,11 +406,9 @@ npm run session:stats
 **Purpose**: Human-readable guides and project-specific references
 
 **Contains**:
-- `OLLAMA_WORKFLOW.md` - When to use local LLM vs Claude
 - `projects/<project>/` - Project-specific documentation
 
 **How to Use**:
-- Read `OLLAMA_WORKFLOW.md` for local LLM guidance
 - Check project docs for schemas, API references, deployment configs
 
 ### When to Create Files (Rare Exceptions)
@@ -470,6 +444,8 @@ This workspace includes an autonomous self-improvement loop based on ExpeL, Voya
 
 **Mode**: Configured in `scripts/self-improvement/config.json` (default: `autonomous`)
 
+**Consolidated Pipeline**: `npm run session:embed` runs the full pipeline — embedding, scoring, insight extraction, reflections, skills, reinforcement, and pruning. Use `--embed-only` to skip the self-improvement steps.
+
 **Commands**:
 - `/improve` — Force manual insight extraction
 - `/review-improvements` — Show auto-applied rules and pending proposals
@@ -478,9 +454,10 @@ This workspace includes an autonomous self-improvement loop based on ExpeL, Voya
 
 **NPM Scripts**:
 ```bash
+npm run session:embed        # Full pipeline (embed + all self-improvement)
+npm run session:embed -- --embed-only  # Just embed, skip self-improvement
 npm run self:stats           # Show rule/reflection statistics
 npm run self:maintenance     # Run full maintenance cycle
-npm run session:score        # Score session chunks (required for insights)
 npm run self:extract-insights # Extract rules from session pairs
 npm run self:generate-reflections # Generate failure reflections
 npm run self:propose-skills  # Scan for novel skill candidates

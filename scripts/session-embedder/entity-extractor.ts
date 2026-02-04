@@ -1,7 +1,7 @@
 /**
  * Entity Extractor
  *
- * Extracts entities from session chunks using Ollama LLM.
+ * Extracts entities from session chunks using regex pattern matching.
  * Based on research:
  * - GraphRAG Survey (arXiv:2408.08921): Entity extraction for knowledge graphs
  * - A-Mem (arXiv:2502.12110): Autonomous attribute-based organization
@@ -13,11 +13,6 @@
  * - files: file paths, directories mentioned
  * - actions: operations performed
  */
-
-import { Ollama } from 'ollama';
-
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
-const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || 'qwen2.5-coder:7b';
 
 export type EntityType = 'tool' | 'concept' | 'decision' | 'file' | 'action';
 
@@ -36,55 +31,15 @@ export interface ExtractionResult {
   extractedAt: string;
 }
 
-// Prompt template for entity extraction
-const EXTRACTION_PROMPT = `You are an entity extraction system analyzing software development conversations.
-
-Extract entities from the following text and return them in JSON format.
-
-Entity types to extract:
-1. tools - npm packages, CLI tools, frameworks, libraries (e.g., "react", "docker", "typescript")
-2. concepts - programming concepts, patterns, methodologies (e.g., "dependency injection", "GraphRAG", "tiered memory")
-3. decisions - architectural or technology choices made (e.g., "use PostgreSQL instead of MongoDB")
-4. files - file paths or directories mentioned (e.g., "src/components/Button.tsx")
-5. actions - operations performed (e.g., "npm install", "git commit")
-
-Return ONLY valid JSON in this exact format:
-{
-  "entities": [
-    {"type": "tool", "name": "react", "context": "used for building UI", "confidence": 0.95},
-    {"type": "concept", "name": "hooks", "context": "React hooks for state management", "confidence": 0.9}
-  ],
-  "summary": "Brief 1-sentence summary of what this text is about",
-  "topics": ["topic1", "topic2"]
-}
-
-Rules:
-- confidence should be 0.0-1.0 based on how clearly the entity was mentioned
-- Each entity should have unique name (case-insensitive)
-- Limit to top 15 most relevant entities
-- summary should be max 100 characters
-- topics should be 2-5 high-level categories
-
-TEXT TO ANALYZE:
----
-{text}
----
-
-Respond with ONLY the JSON, no explanation or markdown:`;
-
 export class EntityExtractor {
-  private ollama: Ollama;
-  private model: string;
   private cache: Map<string, ExtractionResult>;
 
-  constructor(model?: string) {
-    this.ollama = new Ollama({ host: OLLAMA_HOST });
-    this.model = model || EXTRACTION_MODEL;
+  constructor() {
     this.cache = new Map();
   }
 
   /**
-   * Extract entities from text using LLM
+   * Extract entities from text using regex patterns
    */
   async extract(text: string, useCache: boolean = true): Promise<ExtractionResult> {
     // Check cache first
@@ -93,109 +48,12 @@ export class EntityExtractor {
       return this.cache.get(cacheKey)!;
     }
 
-    // Truncate very long texts
-    const maxLength = 4000;
-    const truncatedText = text.length > maxLength
-      ? text.substring(0, maxLength) + '... [truncated]'
-      : text;
+    const result = this.regexExtraction(text);
 
-    const prompt = EXTRACTION_PROMPT.replace('{text}', truncatedText);
+    // Cache the result
+    this.cache.set(cacheKey, result);
 
-    try {
-      const response = await this.ollama.generate({
-        model: this.model,
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0.1,  // Low temperature for consistent extraction
-          num_predict: 1000,
-        },
-      });
-
-      const result = this.parseResponse(response.response);
-
-      // Cache the result
-      this.cache.set(cacheKey, result);
-
-      return result;
-    } catch (error) {
-      console.error('Entity extraction error:', error);
-
-      // Return fallback extraction
-      return this.fallbackExtraction(text);
-    }
-  }
-
-  /**
-   * Parse LLM response to structured format
-   */
-  private parseResponse(response: string): ExtractionResult {
-    try {
-      // Clean up response - remove markdown if present
-      let cleaned = response.trim();
-      if (cleaned.startsWith('```')) {
-        cleaned = cleaned.replace(/^```json?\s*/, '').replace(/```\s*$/, '');
-      }
-
-      const parsed = JSON.parse(cleaned);
-
-      // Validate and normalize entities
-      const entities: Entity[] = (parsed.entities || [])
-        .map((e: any) => ({
-          type: this.normalizeEntityType(e.type),
-          name: String(e.name || '').toLowerCase().trim(),
-          context: String(e.context || '').substring(0, 200),
-          confidence: Math.max(0, Math.min(1, parseFloat(e.confidence) || 0.5)),
-          mentions: 1,
-        }))
-        .filter((e: Entity) => e.name.length > 0);
-
-      return {
-        entities: this.deduplicateEntities(entities),
-        summary: String(parsed.summary || '').substring(0, 200),
-        topics: (parsed.topics || []).map((t: any) => String(t).toLowerCase()),
-        extractedAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      console.warn('Failed to parse extraction response:', error);
-      return {
-        entities: [],
-        summary: '',
-        topics: [],
-        extractedAt: new Date().toISOString(),
-      };
-    }
-  }
-
-  /**
-   * Normalize entity type to valid enum
-   */
-  private normalizeEntityType(type: string): EntityType {
-    const normalized = String(type).toLowerCase().trim();
-
-    const mapping: Record<string, EntityType> = {
-      tool: 'tool',
-      tools: 'tool',
-      package: 'tool',
-      library: 'tool',
-      framework: 'tool',
-      concept: 'concept',
-      concepts: 'concept',
-      pattern: 'concept',
-      methodology: 'concept',
-      decision: 'decision',
-      decisions: 'decision',
-      choice: 'decision',
-      file: 'file',
-      files: 'file',
-      path: 'file',
-      directory: 'file',
-      action: 'action',
-      actions: 'action',
-      operation: 'action',
-    };
-
-    return mapping[normalized] || 'concept';
+    return result;
   }
 
   /**
@@ -234,9 +92,9 @@ export class EntityExtractor {
   }
 
   /**
-   * Fallback extraction using regex patterns (no LLM needed)
+   * Extraction using regex patterns (no LLM needed)
    */
-  private fallbackExtraction(text: string): ExtractionResult {
+  private regexExtraction(text: string): ExtractionResult {
     const entities: Entity[] = [];
 
     // Extract npm packages (common pattern)
@@ -297,7 +155,7 @@ export class EntityExtractor {
 
     return {
       entities: this.deduplicateEntities(entities),
-      summary: 'Extracted via fallback patterns',
+      summary: 'Extracted via regex patterns',
       topics: [],
       extractedAt: new Date().toISOString(),
     };
@@ -329,18 +187,6 @@ export class EntityExtractor {
       topics: Array.from(allTopics).slice(0, 10),
       extractedAt: new Date().toISOString(),
     };
-  }
-
-  /**
-   * Check if Ollama is available
-   */
-  async isAvailable(): Promise<boolean> {
-    try {
-      await this.ollama.list();
-      return true;
-    } catch {
-      return false;
-    }
   }
 }
 

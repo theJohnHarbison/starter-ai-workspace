@@ -99,7 +99,7 @@ export async function executeSessionSearch(args: Record<string, unknown>): Promi
     return `Search failed: ${errorMsg}
 
 Note: This tool requires:
-1. Ollama running with nomic-embed-text model
+1. Qdrant running (docker-compose up -d)
 2. Session embeddings generated via \`npm run session:embed\`
 3. Node.js and npm installed in the workspace`;
   }

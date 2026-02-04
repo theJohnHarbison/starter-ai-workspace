@@ -14,15 +14,6 @@ const fs = require('fs');
 const path = require('path');
 
 const SCRIPTS = [
-  // Setup tools
-  {
-    name: 'setup:models',
-    category: 'setup',
-    description: 'Pull required Ollama models (nomic-embed-text, qwen2.5-coder:7b)',
-    usage: 'npm run setup:models',
-    examples: [],
-  },
-
   // Core workspace tools
   {
     name: 'list-scripts',

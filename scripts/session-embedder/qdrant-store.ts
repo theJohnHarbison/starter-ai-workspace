@@ -3,7 +3,7 @@ import * as path from 'path';
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const COLLECTION_NAME = 'session-embeddings';
-const VECTOR_SIZE = 768; // nomic-embed-text dimensions
+const VECTOR_SIZE = 384; // bge-small-en-v1.5 dimensions
 
 /**
  * Find workspace root by looking for .claude directory
@@ -216,7 +216,7 @@ export class QdrantVectorStore {
     const data = await response.json() as any;
 
     return {
-      model: 'nomic-embed-text',
+      model: 'bge-small-en-v1.5',
       dimensions: VECTOR_SIZE,
       total_sessions: 'N/A', // Would need separate query to count unique sessions
       total_chunks: data.result.points_count,

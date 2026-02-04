@@ -87,8 +87,8 @@ export class VectorStoreManager {
     return {
       entries: [],
       metadata: {
-        model: 'nomic-embed-text',
-        dimensions: 768,
+        model: 'bge-small-en-v1.5',
+        dimensions: 384,
         total_sessions: 0,
         total_chunks: 0,
         created: new Date().toISOString(),

@@ -17,7 +17,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { Rule, StagedChange, Config } from './types';
 import * as claude from './claude-client';
-import * as ollama from './ollama-client'; // For embeddings only
+import { embed, cosineSimilarity } from '../shared/embedder';
 
 const WORKSPACE_ROOT = findWorkspaceRoot();
 const RULES_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/rules.json');
@@ -114,10 +114,10 @@ Respond with exactly one line: VALID or INVALID: <reason>`;
  */
 export async function isDuplicate(ruleText: string, existingRules: Rule[], threshold: number): Promise<boolean> {
   try {
-    const newEmbed = await ollama.embed(ruleText);
+    const newEmbed = await embed(ruleText);
     for (const rule of existingRules.filter(r => r.status === 'active')) {
-      const existingEmbed = await ollama.embed(rule.text);
-      const sim = ollama.cosineSimilarity(newEmbed, existingEmbed);
+      const existingEmbed = await embed(rule.text);
+      const sim = cosineSimilarity(newEmbed, existingEmbed);
       if (sim > threshold) return true;
     }
     return false;
