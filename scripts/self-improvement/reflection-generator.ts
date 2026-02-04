@@ -36,12 +36,29 @@ function findWorkspaceRoot(): string {
 
 const WORKSPACE_ROOT = findWorkspaceRoot();
 const SESSIONS_DIR = path.join(WORKSPACE_ROOT, '.claude/logs/sessions');
+const REFLECTION_STATE_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/reflection-state.json');
 
 interface FailureSignal {
   type: 'retry-loop' | 'backtracking' | 'git-revert' | 'error-message';
   description: string;
   context: string;
   sessionId: string;
+}
+
+interface ReflectionState {
+  processedSessions: Record<string, { date: string; failureCount: number }>;
+}
+
+function loadReflectionState(): ReflectionState {
+  try {
+    return JSON.parse(fs.readFileSync(REFLECTION_STATE_PATH, 'utf8'));
+  } catch {
+    return { processedSessions: {} };
+  }
+}
+
+function saveReflectionState(state: ReflectionState): void {
+  fs.writeFileSync(REFLECTION_STATE_PATH, JSON.stringify(state, null, 2) + '\n');
 }
 
 /**
@@ -186,6 +203,30 @@ PREVENTION_RULE: ...`;
 }
 
 /**
+ * Store a reflection in Qdrant and optionally stage a prevention rule.
+ */
+async function storeReflection(reflection: Reflection, sessionId: string, index: number): Promise<boolean> {
+  const reflectionText = `${reflection.failure_description} | ${reflection.root_cause} | ${reflection.reflection}`;
+  try {
+    const embedding = await embed(reflectionText);
+    await qdrant.storeReflection(
+      `reflection-${sessionId}-${index}`,
+      embedding,
+      reflection as unknown as Record<string, unknown>
+    );
+    console.log(`  Stored reflection: ${reflection.root_cause.substring(0, 80)}`);
+
+    if (reflection.prevention_rule) {
+      await addRule(reflection.prevention_rule, 'reflection', [sessionId]);
+    }
+    return true;
+  } catch (err) {
+    console.error(`  Failed to store reflection:`, (err as Error).message);
+    return false;
+  }
+}
+
+/**
  * Process a session file for failures and generate reflections.
  */
 export async function processSession(sessionPath: string): Promise<number> {
@@ -206,24 +247,8 @@ export async function processSession(sessionPath: string): Promise<number> {
     const reflection = reflections[i];
     if (!reflection) continue;
 
-    // Embed and store the reflection
-    const reflectionText = `${reflection.failure_description} | ${reflection.root_cause} | ${reflection.reflection}`;
-    try {
-      const embedding = await embed(reflectionText);
-      await qdrant.storeReflection(
-        `reflection-${sessionId}-${stored}`,
-        embedding,
-        reflection as unknown as Record<string, unknown>
-      );
+    if (await storeReflection(reflection, sessionId, stored)) {
       stored++;
-      console.log(`  Stored reflection: ${reflection.root_cause.substring(0, 80)}`);
-
-      // Optionally stage a prevention rule
-      if (reflection.prevention_rule) {
-        await addRule(reflection.prevention_rule, 'reflection', [sessionId]);
-      }
-    } catch (err) {
-      console.error(`  Failed to store reflection:`, (err as Error).message);
     }
   }
 
@@ -232,6 +257,9 @@ export async function processSession(sessionPath: string): Promise<number> {
 
 /**
  * Process all sessions or a specific one.
+ * Uses a two-pass approach for batch processing:
+ *   Pass 1 (fast, no Claude): detectFailures() on all unprocessed sessions
+ *   Pass 2 (slow, Claude): batch failures into groups of ~10
  */
 export async function generateReflectionsFromSessions(sessionPath?: string): Promise<number> {
   console.log('Reflection Generator (Reflexion) - Claude CLI');
@@ -249,28 +277,89 @@ export async function generateReflectionsFromSessions(sessionPath?: string): Pro
     return 0;
   }
 
+  // Single session mode bypasses state tracking
   if (sessionPath) {
     return processSession(sessionPath);
   }
 
-  // Process all sessions
+  // Process all sessions with state tracking
   if (!fs.existsSync(SESSIONS_DIR)) {
     console.log('No sessions directory found.');
     return 0;
   }
 
+  const state = loadReflectionState();
   const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
-  console.log(`Processing ${files.length} session file(s)...\n`);
+  const unprocessed = files.filter(f => {
+    const sessionId = path.basename(f, '.json');
+    return !state.processedSessions[sessionId];
+  });
 
-  let total = 0;
-  for (const file of files) {
+  console.log(`Processing ${unprocessed.length} unprocessed sessions (${files.length - unprocessed.length} skipped)...\n`);
+
+  if (unprocessed.length === 0) {
+    console.log('No new sessions to process.');
+    return 0;
+  }
+
+  // Pass 1: Detect failures in all unprocessed sessions (fast, no Claude)
+  const allFailures: FailureSignal[] = [];
+  const sessionFailureCounts: Record<string, number> = {};
+
+  for (const file of unprocessed) {
+    const sessionId = path.basename(file, '.json');
     try {
-      const count = await processSession(path.join(SESSIONS_DIR, file));
-      total += count;
+      const sessionData = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
+      const failures = detectFailures(sessionData, sessionId);
+      sessionFailureCounts[sessionId] = failures.length;
+      allFailures.push(...failures);
     } catch (err) {
-      console.error(`Error processing ${file}:`, (err as Error).message);
+      console.error(`Error reading ${file}:`, (err as Error).message);
+      // Mark as processed to avoid retrying broken files
+      state.processedSessions[sessionId] = {
+        date: new Date().toISOString(),
+        failureCount: 0,
+      };
     }
   }
+
+  console.log(`Pass 1: Found ${allFailures.length} failure signal(s) across ${unprocessed.length} sessions`);
+
+  // Pass 2: Batch failures into groups of ~10 and generate reflections
+  const BATCH_SIZE = 10;
+  let total = 0;
+
+  for (let i = 0; i < allFailures.length; i += BATCH_SIZE) {
+    const batch = allFailures.slice(i, i + BATCH_SIZE);
+    console.log(`\nPass 2: Processing failure batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} failures)...`);
+
+    try {
+      const reflections = await generateReflections(batch);
+
+      for (let j = 0; j < reflections.length; j++) {
+        const reflection = reflections[j];
+        if (!reflection) continue;
+
+        if (await storeReflection(reflection, batch[j].sessionId, total)) {
+          total++;
+        }
+      }
+    } catch (err) {
+      console.error(`Error processing batch:`, (err as Error).message);
+    }
+  }
+
+  // Record all processed sessions in state (even those with 0 failures)
+  for (const file of unprocessed) {
+    const sessionId = path.basename(file, '.json');
+    if (!state.processedSessions[sessionId]) {
+      state.processedSessions[sessionId] = {
+        date: new Date().toISOString(),
+        failureCount: sessionFailureCounts[sessionId] ?? 0,
+      };
+    }
+  }
+  saveReflectionState(state);
 
   console.log(`\nDone. Generated ${total} reflection(s).`);
   return total;
