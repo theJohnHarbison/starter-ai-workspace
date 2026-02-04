@@ -231,7 +231,7 @@ Workspace hooks in `.claude/hooks/` enforce code quality:
 
 ## Self-Improvement System
 
-The workspace includes an autonomous self-improvement loop inspired by ExpeL, Voyager, and Reflexion research. It learns from session patterns and automatically updates guidance in CLAUDE.md.
+The workspace includes an autonomous self-improvement loop inspired by ExpeL, Voyager, and Reflexion research. It learns from session patterns and stores rules locally, injecting them contextually via a hook when relevant to your prompt.
 
 ### How It Works
 
@@ -244,6 +244,7 @@ The full pipeline is consolidated into `npm run session:embed`:
 4. **Generate Reflections** - Analyze failures for improvement reflections
 5. **Track Skills** - Identify novel skill candidates
 6. **Reinforce/Prune** - Track rule reinforcements, prune stale rules (60-day threshold)
+7. **Sync Rules** - Sync active rules to Qdrant for semantic search
 
 Use `npm run session:embed -- --embed-only` to skip the self-improvement steps.
 
@@ -294,7 +295,7 @@ git revert <commit-hash>
 
 ### Limits & Safety
 
-- Maximum 30 active rules
+- Rules stored locally in `rules.json`, injected contextually via hook (not in CLAUDE.md)
 - 60-day staleness pruning
 - Cannot edit its own hooks, settings, or security config
 - Ollama validation gate for rule quality
