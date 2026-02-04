@@ -11,6 +11,7 @@ export interface Rule {
   createdAt: string;
   lastReinforced: string;
   sourceSessionIds: string[];
+  categories?: string[];
 }
 
 export interface Reflection {

@@ -39,6 +39,11 @@
             "type": "command",
             "command": "node .claude/hooks/scripts/skill-suggest.js",
             "timeout": 1000
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/inject-rules.js",
+            "timeout": 1000
           }
         ]
       }

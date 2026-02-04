@@ -1,6 +1,6 @@
 {
   "approvalMode": "autonomous",
-  "maxActiveRules": 30,
+  "maxActiveRules": 500,
   "stalenessThresholdDays": 60,
   "minReinforcementsToKeep": 2,
   "noveltyThreshold": 0.6,
