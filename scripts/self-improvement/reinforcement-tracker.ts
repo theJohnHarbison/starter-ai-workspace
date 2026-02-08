@@ -14,7 +14,7 @@ import * as path from 'path';
 import { Rule, Config } from './types';
 import { embed } from '../shared/embedder';
 import * as qdrant from './qdrant-client';
-import { loadRules, saveRules, writeRulesToClaudeMd } from './proposal-manager';
+import { loadRules, saveRules } from './proposal-manager';
 import { execSync } from 'child_process';
 
 function findWorkspaceRoot(): string {
@@ -32,7 +32,6 @@ function findWorkspaceRoot(): string {
 const WORKSPACE_ROOT = findWorkspaceRoot();
 const CONFIG_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/config.json');
 const RULES_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/rules.json');
-const CLAUDE_MD_PATH = path.join(WORKSPACE_ROOT, 'CLAUDE.md');
 
 function loadConfig(): Config {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -43,6 +42,7 @@ function loadConfig(): Config {
  * for conceptual matches and increment reinforcement count.
  */
 export async function trackReinforcement(): Promise<void> {
+  const config = loadConfig();
   const rules = loadRules();
   const activeRules = rules.filter(r => r.status === 'active');
 
@@ -58,20 +58,26 @@ export async function trackReinforcement(): Promise<void> {
     return;
   }
 
+  const windowDays = config.reinforcementWindowDays ?? 30;
+  const scoreThreshold = config.reinforcementScoreThreshold ?? 0.55;
+  const qualityMin = config.reinforcementQualityMin ?? 4;
+  const searchLimit = config.reinforcementSearchLimit ?? 10;
+
   console.log(`Tracking reinforcement for ${activeRules.length} active rule(s)...`);
+  console.log(`  Config: window=${windowDays}d, score>=${scoreThreshold}, quality>=${qualityMin}, limit=${searchLimit}`);
 
   let updated = 0;
   for (const rule of activeRules) {
     const embedding = await embed(rule.text);
-    const results = await qdrant.searchSessions(embedding, 5, { min: 6 });
+    const results = await qdrant.searchSessions(embedding, searchLimit, { min: qualityMin });
 
-    // Count recent matches (last 7 days) that aren't from the rule's source sessions
+    // Count recent matches that aren't from the rule's source sessions
     const recentMatches = results.filter(r => {
       const date = r.payload.date as string;
       if (!date) return false;
       const daysSince = (Date.now() - new Date(date).getTime()) / 86400000;
       const sessionId = r.payload.session_id as string;
-      return daysSince <= 7 && !rule.sourceSessionIds.includes(sessionId) && r.score >= 0.7;
+      return daysSince <= windowDays && !rule.sourceSessionIds.includes(sessionId) && r.score >= scoreThreshold;
     });
 
     if (recentMatches.length > 0) {
@@ -92,14 +98,16 @@ export async function trackReinforcement(): Promise<void> {
 
 /**
  * Prune stale rules: flag rules that haven't been reinforced recently.
+ * Also removes retired rules from Qdrant.
  */
-export function pruneStaleRules(): { pruned: number; flagged: number } {
+export async function pruneStaleRules(): Promise<{ pruned: number; flagged: number }> {
   const config = loadConfig();
   const rules = loadRules();
   const now = Date.now();
 
   let pruned = 0;
   let flagged = 0;
+  const retiredIds: string[] = [];
 
   for (const rule of rules) {
     if (rule.status !== 'active') continue;
@@ -112,6 +120,7 @@ export function pruneStaleRules(): { pruned: number; flagged: number } {
     if (daysSinceReinforced > config.stalenessThresholdDays &&
         rule.reinforcementCount < config.minReinforcementsToKeep) {
       rule.status = 'retired';
+      retiredIds.push(rule.id);
       pruned++;
       console.log(`  Retired (stale): "${rule.text.substring(0, 60)}..." (${Math.round(daysSinceReinforced)}d, ${rule.reinforcementCount} reinforcements)`);
     } else if (daysSinceReinforced > config.stalenessThresholdDays / 2) {
@@ -122,11 +131,20 @@ export function pruneStaleRules(): { pruned: number; flagged: number } {
 
   if (pruned > 0) {
     saveRules(rules);
-    writeRulesToClaudeMd(rules);
 
-    // Git commit
+    // Remove retired rules from Qdrant
+    const qdrantOk = await qdrant.isQdrantAvailable();
+    if (qdrantOk) {
+      for (const id of retiredIds) {
+        try {
+          await qdrant.deleteRule(id);
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Git commit (only rules.json, not CLAUDE.md)
     try {
-      execSync(`git add "${RULES_PATH}" "${CLAUDE_MD_PATH}"`, { cwd: WORKSPACE_ROOT, stdio: 'pipe' });
+      execSync(`git add -f "${RULES_PATH}"`, { cwd: WORKSPACE_ROOT, stdio: 'pipe' });
       execSync(`git commit -m "chore(self-improve): prune ${pruned} stale rule(s)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"`, {
         cwd: WORKSPACE_ROOT,
         stdio: 'pipe',
@@ -184,6 +202,14 @@ export async function showStats(): Promise<void> {
     console.log('\nReflections: (Qdrant unavailable)');
   }
 
+  // Rules in Qdrant
+  try {
+    const ruleStats = await qdrant.getRuleStats();
+    console.log(`Rules in Qdrant: ${ruleStats.count}`);
+  } catch {
+    console.log('Rules in Qdrant: (unavailable)');
+  }
+
   // Skill candidates
   const candidatesDir = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/skill-candidates');
   if (fs.existsSync(candidatesDir)) {
@@ -206,7 +232,7 @@ async function main(): Promise<void> {
       break;
     case 'prune':
       console.log('Pruning stale rules...');
-      const result = pruneStaleRules();
+      const result = await pruneStaleRules();
       console.log(`\nPruned: ${result.pruned}, Flagged: ${result.flagged}`);
       break;
     case 'stats':

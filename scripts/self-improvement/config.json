@@ -1,10 +1,14 @@
 {
   "approvalMode": "autonomous",
-  "maxActiveRules": 30,
+  "maxActiveRules": 500,
   "stalenessThresholdDays": 60,
   "minReinforcementsToKeep": 2,
   "noveltyThreshold": 0.6,
   "qualityThresholdSuccess": 7,
   "qualityThresholdFailure": 3,
-  "deduplicationSimilarity": 0.85
+  "deduplicationSimilarity": 0.85,
+  "reinforcementWindowDays": 30,
+  "reinforcementScoreThreshold": 0.55,
+  "reinforcementQualityMin": 4,
+  "reinforcementSearchLimit": 10
 }

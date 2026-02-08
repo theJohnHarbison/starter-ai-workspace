@@ -73,6 +73,7 @@ docs/projects/*
 scripts/self-improvement/rules.json
 scripts/self-improvement/staged-changes/
 scripts/self-improvement/skill-candidates/
+scripts/self-improvement/reflection-state.json
 
 # https://skills.sh/
 .agents/

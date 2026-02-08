@@ -1,11 +1,12 @@
 /**
  * Shared Qdrant helper for the self-improvement system.
- * Manages the 'reflections' collection and queries 'session-embeddings'.
+ * Manages the 'reflections', 'rules', and 'session-embeddings' collections.
  */
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const REFLECTIONS_COLLECTION = 'reflections';
 const SESSIONS_COLLECTION = 'session-embeddings';
+const RULES_COLLECTION = 'rules';
 const VECTOR_SIZE = 384;
 
 /**
@@ -190,6 +191,137 @@ export async function getReflectionStats(): Promise<{ count: number }> {
   try {
     await ensureCollection(REFLECTIONS_COLLECTION);
     const res = await fetch(`${QDRANT_URL}/collections/${REFLECTIONS_COLLECTION}`);
+    if (!res.ok) return { count: 0 };
+    const data = await res.json() as { result: { points_count: number } };
+    return { count: data.result.points_count };
+  } catch {
+    return { count: 0 };
+  }
+}
+
+// ─── Rules Collection ────────────────────────────────────────────────
+
+/**
+ * Upsert a rule into the rules collection.
+ */
+export async function storeRule(
+  id: string,
+  embedding: number[],
+  payload: Record<string, unknown>
+): Promise<void> {
+  await ensureCollection(RULES_COLLECTION);
+
+  const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}/points`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      points: [{
+        id: stringToId(id),
+        vector: embedding,
+        payload: { ...payload, rule_id: id },
+      }],
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to store rule: ${res.statusText}`);
+  }
+}
+
+/**
+ * Semantic search for rules by embedding vector.
+ */
+export async function searchRules(
+  embedding: number[],
+  topK: number = 8,
+  statusFilter: string = 'active'
+): Promise<Array<{ payload: Record<string, unknown>; score: number }>> {
+  await ensureCollection(RULES_COLLECTION);
+
+  const body: Record<string, unknown> = {
+    vector: embedding,
+    limit: topK,
+    with_payload: true,
+  };
+
+  if (statusFilter) {
+    body.filter = {
+      must: [{ key: 'status', match: { value: statusFilter } }],
+    };
+  }
+
+  const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}/points/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) return [];
+
+  const data = await res.json() as { result: Array<{ payload: Record<string, unknown>; score: number }> };
+  return data.result;
+}
+
+/**
+ * Delete a rule from the rules collection by its string ID.
+ */
+export async function deleteRule(id: string): Promise<void> {
+  await ensureCollection(RULES_COLLECTION);
+
+  const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}/points/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      points: [stringToId(id)],
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to delete rule: ${res.statusText}`);
+  }
+}
+
+/**
+ * Bulk upsert all rules to Qdrant (idempotent sync).
+ * Processes in batches of 50 to avoid payload limits.
+ */
+export async function syncAllRules(
+  rules: Array<{ id: string; embedding: number[]; payload: Record<string, unknown> }>
+): Promise<number> {
+  await ensureCollection(RULES_COLLECTION);
+
+  const BATCH_SIZE = 50;
+  let synced = 0;
+
+  for (let i = 0; i < rules.length; i += BATCH_SIZE) {
+    const batch = rules.slice(i, i + BATCH_SIZE);
+    const points = batch.map(r => ({
+      id: stringToId(r.id),
+      vector: r.embedding,
+      payload: { ...r.payload, rule_id: r.id },
+    }));
+
+    const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}/points`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points }),
+    });
+
+    if (res.ok) {
+      synced += batch.length;
+    }
+  }
+
+  return synced;
+}
+
+/**
+ * Get rules collection stats.
+ */
+export async function getRuleStats(): Promise<{ count: number }> {
+  try {
+    await ensureCollection(RULES_COLLECTION);
+    const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}`);
     if (!res.ok) return { count: 0 };
     const data = await res.json() as { result: { points_count: number } };
     return { count: data.result.points_count };

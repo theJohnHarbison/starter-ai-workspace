@@ -440,11 +440,11 @@ Hooks are configured in `.claude/hooks/` and travel with the workspace repo.
 
 ## Self-Improving Agent System
 
-This workspace includes an autonomous self-improvement loop based on ExpeL, Voyager, Reflexion, and MemGPT research. The system reviews sessions, extracts rules from successes/failures, generates skills from novel tasks, and updates CLAUDE.md — all auto-applied via git commits and revertable with `git revert`.
+This workspace includes an autonomous self-improvement loop based on ExpeL, Voyager, Reflexion, and MemGPT research. The system reviews sessions, extracts rules from successes/failures, generates skills from novel tasks, and stores rules locally (injected contextually via hook) — all auto-applied via git commits and revertable with `git revert`.
 
 **Mode**: Configured in `scripts/self-improvement/config.json` (default: `autonomous`)
 
-**Consolidated Pipeline**: `npm run session:embed` runs the full pipeline — embedding, scoring, insight extraction, reflections, skills, reinforcement, and pruning. Use `--embed-only` to skip the self-improvement steps.
+**Consolidated Pipeline**: `npm run session:embed` runs the full pipeline — embedding, scoring, insight extraction, reflections, skills, reinforcement, pruning, and Qdrant rule sync. Use `--embed-only` to skip the self-improvement steps.
 
 **Commands**:
 - `/improve` — Force manual insight extraction

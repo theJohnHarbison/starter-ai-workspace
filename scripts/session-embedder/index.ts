@@ -300,7 +300,7 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 1: Score new chunks
   try {
-    console.log(chalk.blue('Step 1/6: Scoring new chunks...'));
+    console.log(chalk.blue('Step 1/7: Scoring new chunks...'));
     const { getPointsToScore, preFilterScore, scoreBatchWithClaude } = await import('./quality-scorer');
     const points = await getPointsToScore({});
     if (points.length > 0) {
@@ -328,7 +328,7 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 2: Extract insights
   try {
-    console.log(chalk.blue('\nStep 2/6: Extracting insights...'));
+    console.log(chalk.blue('\nStep 2/7: Extracting insights...'));
     const { extractInsights } = await import('../self-improvement/insight-extractor');
     const insightCount = await extractInsights();
     summary.push({ step: 'Extract insights', result: `${insightCount} insight(s)` });
@@ -340,7 +340,7 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 3: Generate reflections
   try {
-    console.log(chalk.blue('\nStep 3/6: Generating reflections...'));
+    console.log(chalk.blue('\nStep 3/7: Generating reflections...'));
     const { generateReflectionsFromSessions } = await import('../self-improvement/reflection-generator');
     const reflectionCount = await generateReflectionsFromSessions();
     summary.push({ step: 'Generate reflections', result: `${reflectionCount} reflection(s)` });
@@ -352,7 +352,7 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 4: Check for novel skills
   try {
-    console.log(chalk.blue('\nStep 4/6: Checking for novel skills...'));
+    console.log(chalk.blue('\nStep 4/7: Checking for novel skills...'));
     const sessionsDir = path.join(getWorkspaceRoot(), '.claude/logs/sessions');
     if (fs.existsSync(sessionsDir)) {
       const { checkAndProposeSkill } = await import('../self-improvement/skill-generator');
@@ -377,7 +377,7 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 5: Track reinforcements
   try {
-    console.log(chalk.blue('\nStep 5/6: Tracking reinforcements...'));
+    console.log(chalk.blue('\nStep 5/7: Tracking reinforcements...'));
     const { trackReinforcement } = await import('../self-improvement/reinforcement-tracker');
     await trackReinforcement();
     summary.push({ step: 'Reinforcement', result: 'Done' });
@@ -389,13 +389,25 @@ async function runSelfImprovementPipeline(): Promise<void> {
 
   // Step 6: Prune stale rules
   try {
-    console.log(chalk.blue('\nStep 6/6: Pruning stale rules...'));
+    console.log(chalk.blue('\nStep 6/7: Pruning stale rules...'));
     const { pruneStaleRules } = await import('../self-improvement/reinforcement-tracker');
-    const { pruned, flagged } = pruneStaleRules();
+    const { pruned, flagged } = await pruneStaleRules();
     summary.push({ step: 'Prune rules', result: `${pruned} pruned, ${flagged} flagged` });
     console.log(chalk.green(`   Pruned ${pruned}, flagged ${flagged}`));
   } catch (err) {
     summary.push({ step: 'Prune rules', result: `Skipped: ${(err as Error).message}` });
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
+  }
+
+  // Step 7: Sync rules to Qdrant
+  try {
+    console.log(chalk.blue('\nStep 7/7: Syncing rules to Qdrant...'));
+    const { syncRulesToQdrant } = await import('../self-improvement/proposal-manager');
+    const synced = await syncRulesToQdrant();
+    summary.push({ step: 'Sync rules', result: `${synced} synced` });
+    console.log(chalk.green(`   Synced ${synced} rule(s)`));
+  } catch (err) {
+    summary.push({ step: 'Sync rules', result: `Skipped: ${(err as Error).message}` });
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
@@ -465,6 +477,7 @@ async function main() {
     console.log('  4. Check for novel skills');
     console.log('  5. Track rule reinforcements');
     console.log('  6. Prune stale rules');
+    console.log('  7. Sync rules to Qdrant');
     console.log('');
     console.log('Environment:');
     console.log(`  EMBEDDING_BACKUP_PATH            - Custom backup path (default: ${DEFAULT_BACKUP_PATH})`);

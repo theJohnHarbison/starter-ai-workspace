@@ -1,9 +1,12 @@
 #!/usr/bin/env ts-node
 /**
- * Proposal Manager: Stage, review, validate, and apply changes to CLAUDE.md and skills.
+ * Proposal Manager: Stage, review, validate, and apply rules.
  *
- * In autonomous mode: validates via Claude CLI → writes to CLAUDE.md → git commits.
+ * In autonomous mode: validates via Claude CLI → saves to rules.json → git commits.
  * In propose-and-confirm mode: stages proposals for manual review.
+ *
+ * Rules are stored in rules.json and synced to Qdrant for semantic search.
+ * CLAUDE.md is no longer modified — rules are injected contextually via hook.
  *
  * Usage:
  *   ts-node proposal-manager.ts review           # Show recent changes and pending proposals
@@ -18,15 +21,13 @@ import { execSync } from 'child_process';
 import { Rule, StagedChange, Config } from './types';
 import * as claude from './claude-client';
 import { embed, cosineSimilarity } from '../shared/embedder';
+import { categorizeRule } from './rule-categorizer';
+import * as qdrant from './qdrant-client';
 
 const WORKSPACE_ROOT = findWorkspaceRoot();
 const RULES_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/rules.json');
 const CONFIG_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/config.json');
 const STAGED_DIR = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/staged-changes');
-const CLAUDE_MD_PATH = path.join(WORKSPACE_ROOT, 'CLAUDE.md');
-
-const LEARNED_RULES_HEADER = '## Learned Rules';
-const LEARNED_RULES_MARKER = '<!-- AUTO-MANAGED by self-improvement system. Do not edit manually. -->';
 
 function findWorkspaceRoot(): string {
   if (process.env.WORKSPACE_ROOT) return process.env.WORKSPACE_ROOT;
@@ -129,56 +130,89 @@ export async function isDuplicate(ruleText: string, existingRules: Rule[], thres
 }
 
 /**
- * Write the Learned Rules section to CLAUDE.md.
+ * No-op: Rules are no longer written to CLAUDE.md.
+ * Kept for backward compatibility with callers that haven't been updated.
+ * @deprecated Use inject-rules hook for contextual rule injection instead.
  */
-export function writeRulesToClaudeMd(rules: Rule[]): void {
-  const claudeMd = fs.readFileSync(CLAUDE_MD_PATH, 'utf8');
+export function writeRulesToClaudeMd(_rules: Rule[]): void {
+  // No-op — rules are injected contextually via .claude/hooks/scripts/inject-rules.js
+}
+
+/**
+ * Embed and upsert a single rule to Qdrant.
+ */
+async function upsertRuleToQdrant(rule: Rule): Promise<void> {
+  try {
+    const embedding = await embed(rule.text);
+    await qdrant.storeRule(rule.id, embedding, {
+      text: rule.text,
+      status: rule.status,
+      source: rule.source,
+      categories: rule.categories || categorizeRule(rule.text),
+      reinforcementCount: rule.reinforcementCount,
+      createdAt: rule.createdAt,
+    });
+  } catch (err) {
+    console.error(`  Failed to upsert rule to Qdrant:`, (err as Error).message);
+  }
+}
+
+/**
+ * Sync all active rules from rules.json to Qdrant (idempotent).
+ */
+export async function syncRulesToQdrant(): Promise<number> {
+  const rules = loadRules();
   const activeRules = rules.filter(r => r.status === 'active');
 
-  // Build the new section
-  const lines = [
-    LEARNED_RULES_HEADER,
-    LEARNED_RULES_MARKER,
-  ];
+  if (activeRules.length === 0) {
+    console.log('No active rules to sync.');
+    return 0;
+  }
+
+  const qdrantOk = await qdrant.isQdrantAvailable();
+  if (!qdrantOk) {
+    console.error('Qdrant not available — skipping rule sync.');
+    return 0;
+  }
+
+  // Ensure categories are set on all rules
+  let categoriesUpdated = false;
+  for (const rule of activeRules) {
+    if (!rule.categories || rule.categories.length === 0) {
+      rule.categories = categorizeRule(rule.text);
+      categoriesUpdated = true;
+    }
+  }
+  if (categoriesUpdated) {
+    saveRules(rules);
+  }
+
+  // Build embeddings and sync to Qdrant
+  const rulePoints: Array<{ id: string; embedding: number[]; payload: Record<string, unknown> }> = [];
 
   for (const rule of activeRules) {
-    lines.push(`<!-- Rule: ${rule.id} | Reinforced: ${rule.reinforcementCount} | Last: ${rule.lastReinforced.split('T')[0]} -->`);
-    lines.push(`- ${rule.text}`);
-  }
-
-  if (activeRules.length === 0) {
-    lines.push('<!-- No rules yet. Rules are auto-extracted from session analysis. -->');
-  }
-
-  const newSection = lines.join('\n') + '\n';
-
-  // Find and replace existing section, or append before the last section
-  // Match "## Learned Rules" through to the next "## " heading (handles \r\n)
-  const sectionRegex = /## Learned Rules\r?\n[\s\S]*?(?=\r?\n## [^L]|\r?\n---\s*$|$)/;
-  let updatedMd: string;
-
-  if (sectionRegex.test(claudeMd)) {
-    // Replace ALL occurrences (in case of duplicates from prior bugs)
-    updatedMd = claudeMd.replace(sectionRegex, newSection);
-    // If somehow there's still a duplicate, remove it
-    const secondIdx = updatedMd.indexOf('## Learned Rules', updatedMd.indexOf('## Learned Rules') + 1);
-    if (secondIdx !== -1) {
-      const nextSection = updatedMd.indexOf('\n## ', secondIdx + 1);
-      updatedMd = updatedMd.slice(0, secondIdx) + (nextSection !== -1 ? updatedMd.slice(nextSection + 1) : '');
-    }
-    updatedMd = updatedMd.replace(/\n{3,}/g, '\n\n');
-  } else {
-    // Insert before "## Before You Start" or append at end
-    const insertBefore = '## Before You Start';
-    const insertIdx = claudeMd.indexOf(insertBefore);
-    if (insertIdx !== -1) {
-      updatedMd = claudeMd.slice(0, insertIdx) + newSection + '\n\n' + claudeMd.slice(insertIdx);
-    } else {
-      updatedMd = claudeMd + '\n\n' + newSection + '\n';
+    try {
+      const embedding = await embed(rule.text);
+      rulePoints.push({
+        id: rule.id,
+        embedding,
+        payload: {
+          text: rule.text,
+          status: rule.status,
+          source: rule.source,
+          categories: rule.categories || [],
+          reinforcementCount: rule.reinforcementCount,
+          createdAt: rule.createdAt,
+        },
+      });
+    } catch (err) {
+      console.error(`  Failed to embed rule ${rule.id}:`, (err as Error).message);
     }
   }
 
-  fs.writeFileSync(CLAUDE_MD_PATH, updatedMd);
+  const synced = await qdrant.syncAllRules(rulePoints);
+  console.log(`Synced ${synced}/${activeRules.length} active rules to Qdrant.`);
+  return synced;
 }
 
 /**
@@ -246,6 +280,7 @@ export async function addRule(
   // Validation
   const validation = await validateRule(ruleText, rules);
 
+  const categories = categorizeRule(ruleText);
   const newRule: Rule = {
     id: generateId(),
     text: ruleText,
@@ -255,11 +290,13 @@ export async function addRule(
     createdAt: new Date().toISOString(),
     lastReinforced: new Date().toISOString(),
     sourceSessionIds,
+    categories,
   };
 
   if (options?.dryRun) {
     console.log(`[DRY RUN] Would add rule: "${ruleText}"`);
     console.log(`  Validation: ${validation.valid ? 'PASSED' : `FAILED (${validation.reason})`}`);
+    console.log(`  Categories: ${categories.join(', ')}`);
     return { applied: false, reason: 'Dry run' };
   }
 
@@ -267,8 +304,8 @@ export async function addRule(
     // Auto-apply
     rules.push(newRule);
     saveRules(rules);
-    writeRulesToClaudeMd(rules);
-    gitCommit(`add rule: ${ruleText.substring(0, 60)}`, [RULES_PATH, CLAUDE_MD_PATH]);
+    await upsertRuleToQdrant(newRule);
+    gitCommit(`add rule: ${ruleText.substring(0, 60)}`, [RULES_PATH]);
     return { applied: true, reason: 'Auto-applied (autonomous mode)' };
   } else {
     // Stage for review
@@ -315,18 +352,18 @@ export async function applyPending(options?: { dryRun?: boolean }): Promise<void
     const validation = await validateRule(rule.text, rules.filter(r => r.status === 'active'));
     if (validation.valid) {
       rule.status = 'active';
+      rule.categories = categorizeRule(rule.text);
       applied++;
-      console.log(`    ✓ Activated`);
+      console.log(`    Activated`);
     } else {
-      console.log(`    ✗ Rejected: ${validation.reason}`);
+      console.log(`    Rejected: ${validation.reason}`);
       rule.status = 'retired';
     }
   }
 
   if (!options?.dryRun && applied > 0) {
     saveRules(rules);
-    writeRulesToClaudeMd(rules);
-    gitCommit(`apply ${applied} pending rule(s)`, [RULES_PATH, CLAUDE_MD_PATH]);
+    gitCommit(`apply ${applied} pending rule(s)`, [RULES_PATH]);
     console.log(`\nApplied ${applied} rule(s), committed to git.`);
   }
 
@@ -359,7 +396,8 @@ export function review(): void {
   console.log(`\nActive rules: ${active.length}`);
   for (const r of active) {
     const age = Math.round((Date.now() - new Date(r.createdAt).getTime()) / 86400000);
-    console.log(`  [${r.id}] (reinforced: ${r.reinforcementCount}, ${age}d old) ${r.text}`);
+    const cats = r.categories ? ` [${r.categories.join(', ')}]` : '';
+    console.log(`  [${r.id}] (reinforced: ${r.reinforcementCount}, ${age}d old)${cats} ${r.text}`);
   }
 
   if (proposed.length > 0) {
@@ -411,6 +449,10 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'sync':
+      await syncRulesToQdrant();
+      break;
+
     default:
       console.log('Proposal Manager');
       console.log('');
@@ -419,6 +461,7 @@ async function main(): Promise<void> {
       console.log('  apply               Apply pending proposals');
       console.log('  apply --dry-run     Preview what would be applied');
       console.log('  add "rule text"     Add a rule directly');
+      console.log('  sync                Sync all active rules to Qdrant');
       break;
   }
 }
