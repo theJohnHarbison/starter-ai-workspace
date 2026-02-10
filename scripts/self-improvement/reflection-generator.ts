@@ -327,11 +327,15 @@ export async function generateReflectionsFromSessions(sessionPath?: string): Pro
 
   // Pass 2: Batch failures into groups of ~10 and generate reflections
   const BATCH_SIZE = 10;
+  const totalBatches = Math.ceil(allFailures.length / BATCH_SIZE);
   let total = 0;
+  let duplicateCount = 0;
+  const seenPreventionRules = new Set<string>();
 
   for (let i = 0; i < allFailures.length; i += BATCH_SIZE) {
     const batch = allFailures.slice(i, i + BATCH_SIZE);
-    console.log(`\nPass 2: Processing failure batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} failures)...`);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+    console.log(`\nGenerating reflections... batch ${batchNum}/${totalBatches} (${batch.length} failures)`);
 
     try {
       const reflections = await generateReflections(batch);
@@ -340,6 +344,16 @@ export async function generateReflectionsFromSessions(sessionPath?: string): Pro
         const reflection = reflections[j];
         if (!reflection) continue;
 
+        // Within-batch dedup: skip duplicate prevention rules
+        if (reflection.prevention_rule) {
+          const normalized = reflection.prevention_rule.toLowerCase().trim();
+          if (seenPreventionRules.has(normalized)) {
+            duplicateCount++;
+            continue;
+          }
+          seenPreventionRules.add(normalized);
+        }
+
         if (await storeReflection(reflection, batch[j].sessionId, total)) {
           total++;
         }
@@ -347,6 +361,10 @@ export async function generateReflectionsFromSessions(sessionPath?: string): Pro
     } catch (err) {
       console.error(`Error processing batch:`, (err as Error).message);
     }
+  }
+
+  if (duplicateCount > 0) {
+    console.log(`  Skipped ${duplicateCount} duplicate prevention rule(s)`);
   }
 
   // Record all processed sessions in state (even those with 0 failures)

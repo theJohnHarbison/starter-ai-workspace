@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   // Step 3: Prune stale rules
   console.log('\n─── Step 3: Pruning ───\n');
   try {
-    const result = pruneStaleRules();
+    const result = await pruneStaleRules();
     console.log(`Pruned: ${result.pruned}, Flagged: ${result.flagged}`);
   } catch (err) {
     console.error('Pruning failed:', (err as Error).message);

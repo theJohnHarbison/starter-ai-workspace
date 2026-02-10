@@ -5,7 +5,6 @@ import { SessionChunker } from './chunker';
 import { VectorEntry } from './vector-store';
 import { QdrantVectorStore } from './qdrant-store';
 import { QdrantBackupManager } from './qdrant-backup';
-import { generateTopicMap } from './topic-map';
 import chalk from 'chalk';
 
 const DEFAULT_BACKUP_PATH = process.env.EMBEDDING_BACKUP_PATH || './backups';
@@ -130,11 +129,15 @@ export class SessionEmbedder {
     return embed(text);
   }
 
-  async embedSession(sessionPath: string): Promise<void> {
+  async embedSession(sessionPath: string, embeddedIds?: Set<string>): Promise<void> {
     const sessionId = path.basename(sessionPath, '.json');
 
-    if (await this.vectorStore.hasSession(sessionId)) {
-      console.log(chalk.gray(`⚠️  Session ${sessionId} already embedded, skipping...`));
+    // Use pre-fetched set if available, otherwise fall back to per-session check
+    const alreadyEmbedded = embeddedIds
+      ? embeddedIds.has(sessionId)
+      : await this.vectorStore.hasSession(sessionId);
+
+    if (alreadyEmbedded) {
       return;
     }
 
@@ -219,32 +222,31 @@ export class SessionEmbedder {
   async embedSessionsInDirectory(dirPath: string, backupPath?: string): Promise<void> {
     console.log(chalk.cyan(`\n🔍 Scanning directory: ${dirPath}`));
 
-    const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.json'));
+    const allFiles = fs.readdirSync(dirPath).filter(f => f.endsWith('.json'));
 
-    console.log(chalk.cyan(`📊 Found ${chalk.bold(String(files.length))} session files to process\n`));
+    // Fetch all embedded session IDs upfront (single Qdrant scroll) instead of per-file checks
+    console.log(chalk.cyan(`📊 Found ${chalk.bold(String(allFiles.length))} session files on disk`));
+    console.log(chalk.gray(`   Fetching embedded session index from Qdrant...`));
+
+    const embeddedIds = await this.vectorStore.getEmbeddedSessionIds();
+    const newFiles = allFiles.filter(f => !embeddedIds.has(path.basename(f, '.json')));
+    const skipped = allFiles.length - newFiles.length;
+
+    console.log(chalk.cyan(`   ${chalk.green.bold(String(newFiles.length))} new sessions to embed, ${chalk.yellow(String(skipped))} already embedded\n`));
 
     let processed = 0;
-    let skipped = 0;
     let errors = 0;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < newFiles.length; i++) {
+      const file = newFiles[i];
       const fullPath = path.join(dirPath, file);
 
       console.log(chalk.gray(`─────────────────────────────────────────────────────────────────────`));
-      console.log(chalk.magenta(`[${i + 1}/${files.length}] Processing: ${file}`));
+      console.log(chalk.magenta(`[${i + 1}/${newFiles.length}] Processing: ${file}`));
 
       try {
-        const sessionId = path.basename(file, '.json');
-        const wasAlreadyEmbedded = await this.vectorStore.hasSession(sessionId);
-
-        await this.embedSession(fullPath);
-
-        if (wasAlreadyEmbedded) {
-          skipped++;
-        } else {
-          processed++;
-        }
+        await this.embedSession(fullPath, embeddedIds);
+        processed++;
       } catch (error) {
         errors++;
         console.error(chalk.red(`   ❌ Error embedding ${file}:`), error);
@@ -274,15 +276,40 @@ export class SessionEmbedder {
       }
     }
 
-    // Regenerate topic map visualization
-    console.log(chalk.cyan('\n🗺️  Regenerating topic map visualization...'));
-    try {
-      await generateTopicMap({ silent: true });
-      console.log(chalk.green('✅ Topic map updated: .claude/visualizations/topic-map.html'));
-    } catch (error) {
-      console.error(chalk.red('⚠️  Topic map generation failed:'), error);
-    }
+    console.log('');
+  }
+}
 
+/**
+ * Timer for tracking duration of each pipeline step.
+ */
+class StepTimer {
+  private timings: Array<{ step: string; result: string; durationMs: number }> = [];
+  private stepStart: number = 0;
+
+  startStep(): void {
+    this.stepStart = Date.now();
+  }
+
+  endStep(step: string, result: string): void {
+    this.timings.push({ step, result, durationMs: Date.now() - this.stepStart });
+  }
+
+  formatDuration(ms: number): string {
+    return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  printSummary(): void {
+    const totalMs = this.timings.reduce((sum, t) => sum + t.durationMs, 0);
+    console.log(chalk.cyan('\n' + '='.repeat(65)));
+    console.log(chalk.cyan.bold('  Pipeline Summary'));
+    console.log(chalk.cyan('='.repeat(65)));
+    for (const { step, result, durationMs } of this.timings) {
+      const duration = chalk.gray(this.formatDuration(durationMs).padStart(8));
+      console.log(`  ${chalk.bold(step.padEnd(22))} ${result.padEnd(45)} ${duration}`);
+    }
+    console.log(chalk.cyan('─'.repeat(65)));
+    console.log(`  ${chalk.bold('Total'.padEnd(22))} ${' '.repeat(45)} ${chalk.gray(this.formatDuration(totalMs).padStart(8))}`);
     console.log('');
   }
 }
@@ -296,129 +323,216 @@ async function runSelfImprovementPipeline(): Promise<void> {
   console.log(chalk.cyan.bold('  Self-Improvement Pipeline'));
   console.log(chalk.cyan('='.repeat(65) + '\n'));
 
-  const summary: Array<{ step: string; result: string }> = [];
+  const timer = new StepTimer();
 
   // Step 1: Score new chunks
+  timer.startStep();
   try {
-    console.log(chalk.blue('Step 1/7: Scoring new chunks...'));
-    const { getPointsToScore, preFilterScore, scoreBatchWithClaude } = await import('./quality-scorer');
+    console.log(chalk.blue('Step 1/8: Scoring new chunks...'));
+    const { getPointsToScore, preFilterScore, scoreBatchWithClaude, updatePointScores, bulkUpdateScoresByGroup } = await import('./quality-scorer');
     const points = await getPointsToScore({});
     if (points.length > 0) {
-      let preFiltered = 0;
-      let needsLLM = 0;
+      // Phase 1: Pre-filter obvious noise with heuristics
+      const preFilteredItems: Array<{ id: string | number; score: number }> = [];
+      const needsLLMPoints: Array<{ id: string | number; payload: Record<string, unknown> }> = [];
+
       for (const point of points) {
         const chunkText = (point.payload.chunk_text as string) || '';
         const score = preFilterScore(chunkText);
         if (score !== null) {
-          preFiltered++;
+          preFilteredItems.push({ id: point.id, score });
         } else {
-          needsLLM++;
+          needsLLMPoints.push(point);
         }
       }
-      summary.push({ step: 'Score chunks', result: `${points.length} chunks (${preFiltered} pre-filtered, ${needsLLM} need LLM)` });
-      console.log(chalk.green(`   Found ${points.length} chunks to score (${preFiltered} pre-filtered)`));
+
+      console.log(chalk.green(`   Found ${points.length} chunks to score (${preFilteredItems.length} pre-filtered, ${needsLLMPoints.length} need LLM)`));
+
+      // Write pre-filtered scores to Qdrant in bulk
+      if (preFilteredItems.length > 0) {
+        console.log(chalk.gray(`   Writing ${preFilteredItems.length} pre-filtered scores...`));
+        await bulkUpdateScoresByGroup(preFilteredItems);
+      }
+
+      // Phase 2: Score remaining chunks with Claude CLI
+      if (needsLLMPoints.length > 0) {
+        const BATCH_SIZE = 25;
+        const batches: Array<Array<{ id: string | number; text: string }>> = [];
+        for (let i = 0; i < needsLLMPoints.length; i += BATCH_SIZE) {
+          batches.push(needsLLMPoints.slice(i, i + BATCH_SIZE).map(p => ({
+            id: p.id,
+            text: (p.payload.chunk_text as string) || '',
+          })));
+        }
+        console.log(chalk.gray(`   LLM scoring ${needsLLMPoints.length} chunks in ${batches.length} batches...`));
+
+        let scored = 0;
+        for (const batch of batches) {
+          const results = await scoreBatchWithClaude(batch);
+          for (const result of results) {
+            await updatePointScores([{ id: result.id, score: result.score }]);
+          }
+          scored += batch.length;
+          process.stdout.write(`\r   Scored ${scored}/${needsLLMPoints.length} chunks...`);
+        }
+        console.log('');
+      }
+
+      timer.endStep('Score chunks', `${points.length} chunks (${preFilteredItems.length} pre-filtered)`);
     } else {
-      summary.push({ step: 'Score chunks', result: 'All scored' });
+      timer.endStep('Score chunks', 'All scored');
       console.log(chalk.gray('   All chunks already scored'));
     }
   } catch (err) {
-    summary.push({ step: 'Score chunks', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Score chunks', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 2: Extract insights
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 2/7: Extracting insights...'));
+    console.log(chalk.blue('\nStep 2/8: Extracting insights...'));
     const { extractInsights } = await import('../self-improvement/insight-extractor');
     const insightCount = await extractInsights();
-    summary.push({ step: 'Extract insights', result: `${insightCount} insight(s)` });
+    timer.endStep('Extract insights', `${insightCount} insight(s)`);
     console.log(chalk.green(`   Extracted ${insightCount} insight(s)`));
   } catch (err) {
-    summary.push({ step: 'Extract insights', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Extract insights', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 3: Generate reflections
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 3/7: Generating reflections...'));
+    console.log(chalk.blue('\nStep 3/8: Generating reflections...'));
     const { generateReflectionsFromSessions } = await import('../self-improvement/reflection-generator');
     const reflectionCount = await generateReflectionsFromSessions();
-    summary.push({ step: 'Generate reflections', result: `${reflectionCount} reflection(s)` });
+    timer.endStep('Generate reflections', `${reflectionCount} reflection(s)`);
     console.log(chalk.green(`   Generated ${reflectionCount} reflection(s)`));
   } catch (err) {
-    summary.push({ step: 'Generate reflections', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Generate reflections', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 4: Check for novel skills
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 4/7: Checking for novel skills...'));
+    console.log(chalk.blue('\nStep 4/8: Checking for novel skills...'));
     const sessionsDir = path.join(getWorkspaceRoot(), '.claude/logs/sessions');
     if (fs.existsSync(sessionsDir)) {
-      const { checkAndProposeSkill } = await import('../self-improvement/skill-generator');
-      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
-      let proposed = 0;
-      for (const file of files) {
-        try {
-          const result = await checkAndProposeSkill(path.join(sessionsDir, file));
-          if (result) proposed++;
-        } catch { /* continue */ }
+      const { checkAndProposeSkill, loadSkillState, saveSkillState } = await import('../self-improvement/skill-generator');
+      const skillState = loadSkillState();
+      const allFiles = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+      const files = allFiles.filter(f => {
+        const sessionId = path.basename(f, '.json');
+        return !skillState.processedSessions[sessionId];
+      });
+      const skippedCount = allFiles.length - files.length;
+
+      if (files.length === 0) {
+        console.log(chalk.gray(`   No new sessions to check (${skippedCount} already checked)`));
+        timer.endStep('Propose skills', `0 new (${skippedCount} already checked)`);
+      } else {
+        console.log(chalk.gray(`   ${files.length} new sessions to check (${skippedCount} already checked)`));
+        let proposed = 0;
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const sessionId = path.basename(file, '.json');
+          console.log(chalk.gray(`   Checking session ${i + 1}/${files.length} for novel patterns...`));
+          try {
+            const result = await checkAndProposeSkill(path.join(sessionsDir, file));
+            skillState.processedSessions[sessionId] = {
+              date: new Date().toISOString(),
+              proposed: result !== null,
+            };
+            if (result) proposed++;
+          } catch {
+            skillState.processedSessions[sessionId] = {
+              date: new Date().toISOString(),
+              proposed: false,
+            };
+          }
+        }
+        saveSkillState(skillState);
+        timer.endStep('Propose skills', `${proposed} proposed (${files.length} new, ${skippedCount} skipped)`);
+        console.log(chalk.green(`   Proposed ${proposed} skill(s)`));
       }
-      summary.push({ step: 'Propose skills', result: `${proposed} proposed` });
-      console.log(chalk.green(`   Proposed ${proposed} skill(s)`));
     } else {
-      summary.push({ step: 'Propose skills', result: 'No sessions dir' });
+      timer.endStep('Propose skills', 'No sessions dir');
       console.log(chalk.gray('   No sessions directory'));
     }
   } catch (err) {
-    summary.push({ step: 'Propose skills', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Propose skills', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 5: Track reinforcements
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 5/7: Tracking reinforcements...'));
+    console.log(chalk.blue('\nStep 5/8: Tracking reinforcements...'));
     const { trackReinforcement } = await import('../self-improvement/reinforcement-tracker');
     await trackReinforcement();
-    summary.push({ step: 'Reinforcement', result: 'Done' });
+    timer.endStep('Reinforcement', 'Done');
     console.log(chalk.green('   Done'));
   } catch (err) {
-    summary.push({ step: 'Reinforcement', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Reinforcement', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 6: Prune stale rules
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 6/7: Pruning stale rules...'));
+    console.log(chalk.blue('\nStep 6/8: Pruning stale rules...'));
     const { pruneStaleRules } = await import('../self-improvement/reinforcement-tracker');
     const { pruned, flagged } = await pruneStaleRules();
-    summary.push({ step: 'Prune rules', result: `${pruned} pruned, ${flagged} flagged` });
+    timer.endStep('Prune rules', `${pruned} pruned, ${flagged} flagged`);
     console.log(chalk.green(`   Pruned ${pruned}, flagged ${flagged}`));
   } catch (err) {
-    summary.push({ step: 'Prune rules', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Prune rules', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
   // Step 7: Sync rules to Qdrant
+  timer.startStep();
   try {
-    console.log(chalk.blue('\nStep 7/7: Syncing rules to Qdrant...'));
+    console.log(chalk.blue('\nStep 7/8: Syncing rules to Qdrant...'));
     const { syncRulesToQdrant } = await import('../self-improvement/proposal-manager');
     const synced = await syncRulesToQdrant();
-    summary.push({ step: 'Sync rules', result: `${synced} synced` });
+    timer.endStep('Sync rules', `${synced} synced`);
     console.log(chalk.green(`   Synced ${synced} rule(s)`));
   } catch (err) {
-    summary.push({ step: 'Sync rules', result: `Skipped: ${(err as Error).message}` });
+    timer.endStep('Sync rules', `Skipped: ${(err as Error).message}`);
     console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
 
-  // Print summary
-  console.log(chalk.cyan('\n' + '='.repeat(65)));
-  console.log(chalk.cyan.bold('  Pipeline Summary'));
-  console.log(chalk.cyan('='.repeat(65)));
-  for (const { step, result } of summary) {
-    console.log(`  ${chalk.bold(step.padEnd(22))} ${result}`);
+  // Step 8: Generate unified dashboard
+  timer.startStep();
+  let dashboardOutputPath = '';
+  try {
+    console.log(chalk.blue('\nStep 8/8: Generating dashboard...'));
+    const { generateDashboard } = await import('./dashboard-generator');
+    dashboardOutputPath = await generateDashboard();
+    timer.endStep('Dashboard', 'Generated');
+    console.log(chalk.green('   Dashboard generated'));
+  } catch (err) {
+    timer.endStep('Dashboard', `Skipped: ${(err as Error).message}`);
+    console.log(chalk.yellow(`   Skipped: ${(err as Error).message}`));
   }
-  console.log('');
+
+  timer.printSummary();
+
+  // Open the dashboard in the default browser
+  if (dashboardOutputPath) {
+    const htmlPath = path.join(path.dirname(dashboardOutputPath), 'dashboard.html');
+    if (fs.existsSync(htmlPath)) {
+      const { exec } = await import('child_process');
+      const cmd = process.platform === 'win32' ? `start "" "${htmlPath}"`
+        : process.platform === 'darwin' ? `open "${htmlPath}"`
+        : `xdg-open "${htmlPath}"`;
+      exec(cmd);
+      console.log(chalk.green(`\n  Opening dashboard: ${htmlPath}`));
+    }
+  }
 }
 
 async function main() {
@@ -432,6 +546,14 @@ async function main() {
     const sessionPath = args[1];
     const skipBackup = args.includes('--no-backup');
     const embedOnly = args.includes('--embed-only');
+    const rebuild = args.includes('--rebuild');
+
+    if (rebuild) {
+      console.log(chalk.yellow('🔄 Rebuilding: deleting existing collection...'));
+      const vectorStore = new QdrantVectorStore();
+      await vectorStore.deleteCollection();
+      console.log(chalk.green('   Collection deleted. Re-embedding all sessions.\n'));
+    }
 
     if (!sessionPath || sessionPath.startsWith('--')) {
       const defaultPath = path.join(WORKSPACE_ROOT, '.claude', 'logs', 'sessions');
@@ -467,6 +589,7 @@ async function main() {
     console.log('Usage:');
     console.log('  npm run session:embed                    - Embed + full self-improvement pipeline');
     console.log('  npm run session:embed -- --embed-only    - Embed only, skip self-improvement');
+    console.log('  npm run session:embed -- --rebuild       - Delete collection and re-embed everything');
     console.log('  npm run session:embed -- --no-backup     - Skip backup step');
     console.log('  npm run session:stats                    - Show vector store statistics');
     console.log('');
@@ -478,6 +601,7 @@ async function main() {
     console.log('  5. Track rule reinforcements');
     console.log('  6. Prune stale rules');
     console.log('  7. Sync rules to Qdrant');
+    console.log('  8. Generate dashboard');
     console.log('');
     console.log('Environment:');
     console.log(`  EMBEDDING_BACKUP_PATH            - Custom backup path (default: ${DEFAULT_BACKUP_PATH})`);

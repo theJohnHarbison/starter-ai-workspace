@@ -12,6 +12,9 @@ let pipelineInstance: any = null;
 
 export const VECTOR_DIMENSIONS = 384;
 
+/** Process-lifetime cache to avoid re-embedding identical texts. */
+const embeddingCache = new Map<string, number[]>();
+
 /**
  * Get or create the embedding pipeline (singleton).
  */
@@ -30,9 +33,14 @@ async function getPipeline(): Promise<any> {
  * Embed a single text string into a 384-dim vector.
  */
 export async function embed(text: string): Promise<number[]> {
+  const cached = embeddingCache.get(text);
+  if (cached) return cached;
+
   const pipe = await getPipeline();
   const output = await pipe(text, { pooling: 'mean', normalize: true });
-  return Array.from(output.data as Float32Array);
+  const result = Array.from(output.data as Float32Array);
+  embeddingCache.set(text, result);
+  return result;
 }
 
 /**
@@ -43,8 +51,15 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
   const results: number[][] = [];
 
   for (const text of texts) {
+    const cached = embeddingCache.get(text);
+    if (cached) {
+      results.push(cached);
+      continue;
+    }
     const output = await pipe(text, { pooling: 'mean', normalize: true });
-    results.push(Array.from(output.data as Float32Array));
+    const result = Array.from(output.data as Float32Array);
+    embeddingCache.set(text, result);
+    results.push(result);
   }
 
   return results;

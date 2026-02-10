@@ -86,8 +86,22 @@ const topRules = scored.slice(0, 8).filter(s => s.score >= 2);
 
 // Only output if we have meaningful matches (score >= 2 means at least 2 keyword hits)
 if (topRules.length > 0) {
+  // Collect unique categories for summary
+  const categories = [...new Set(topRules.flatMap(s => s.rule.categories || []))];
+  const categorySuffix = categories.length > 0 ? ` | categories: ${categories.join(', ')}` : '';
+  const prefix = `[${topRules.length} rules injected${categorySuffix}]`;
+
   const ruleLines = topRules.map(s => `- ${s.rule.text}`).join('\n');
-  console.log(`Relevant learned rules:\n${ruleLines}`);
+  console.log(`${prefix}\nRelevant learned rules:\n${ruleLines}`);
+
+  // Log value event
+  try {
+    const { logValueEvent } = require('./value-logger');
+    logValueEvent('rule_injection', topRules.length, {
+      categories,
+      ruleIds: topRules.map(s => s.rule.id),
+    });
+  } catch {}
 }
 
 process.exit(0);

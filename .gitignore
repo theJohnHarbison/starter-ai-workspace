@@ -35,8 +35,9 @@ Thumbs.db
 !.claude/logs/README.md
 .claude.backup/
 
-# Generated visualizations (regenerated via npm run session:embed)
-.claude/visualizations/
+# Generated visualization data (regenerated via npm run session:embed)
+.claude/visualizations/*
+!.claude/visualizations/.gitkeep
 
 # Workspace specific (local only)
 agent/_projects/*
@@ -56,6 +57,8 @@ node_modules/
 *.d.ts
 dist/
 build/
+tmp/
+temp_*
 
 # Logs
 *.log
@@ -65,7 +68,7 @@ yarn-error.log*
 nul
 backups/
 
-# Private project docs (local only - add your project-specific docs here)
+# Private project docs (local only)
 docs/projects/*
 !docs/projects/.gitkeep
 
@@ -74,6 +77,7 @@ scripts/self-improvement/rules.json
 scripts/self-improvement/staged-changes/
 scripts/self-improvement/skill-candidates/
 scripts/self-improvement/reflection-state.json
+scripts/self-improvement/skill-state.json
 
 # https://skills.sh/
 .agents/

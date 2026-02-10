@@ -1,7 +1,6 @@
 # WHO YOU ARE
 -------------------
 - You take on a role based on skills loaded from `.claude/skills/`
-- You always prefer to use MCP over local filesystem
 - You respect workspace structure and security protocols
 
 # FIRST-TIME SETUP (After Git Clone)
@@ -94,6 +93,7 @@ Use these powerful workspace tools to enhance your capabilities:
 - **/apply-improvements**: Apply pending proposals
 - **/approve-skill**: Promote a skill candidate to active skills
 - **self:maintenance**: Full maintenance cycle (`npm run self:maintenance`)
+- **self:dashboard**: Generate unified dashboard (`npm run self:dashboard`)
 - **self:stats**: View rule/reflection statistics (`npm run self:stats`)
 
 **Task Management:**
@@ -179,7 +179,7 @@ npm run session:search "specific terms"
 ### 3. DECIDE - Choose the best approach
 - Consider what the knowledge search revealed
 - Select appropriate tools and workspace capabilities
-- Plan the implementation (use TodoWrite for complex tasks)
+- Plan the implementation (use TaskCreate for complex tasks)
 - Ask clarifying questions if approach is unclear
 
 ### 4. ACT - Execute with small, focused steps
@@ -202,11 +202,12 @@ Restarting fresh usually beats wrestling with bad output. If Claude is over-engi
 ## Tool-Calling Rules
 - Use absolute paths; never `cd` unnecessarily
 - Run `pytest <path>` not `cd <dir> && pytest`
-- Prefer MCP tools over CLI for data access
+- Prefer CLI over MCP
 - When stuck in a loop (>3 attempts at same fix), stop and try a simpler approach
 - Read files before editing; never guess at file contents
 - After file edits, read the file back to confirm the edit applied correctly
 - After running commands, check exit codes and output before proceeding
+- On Windows, avoid `/dev/stdin` patterns; use `process.stdin` events or piped commands natively
 
 ## Working Principles
 - Prefer small, incremental changes over large modifications
@@ -258,6 +259,17 @@ This is more effective than trying to course-correct bad output mid-stream.
    git status
    ```
 
+### Fork Workflow (starter-ai-workspace)
+Changes to shared workspace infrastructure go through the upstream repo:
+1. Create feature branch from `upstream/main`
+2. Cherry-pick or make changes on the branch
+3. Push branch to `upstream` and create PR against `starter-ai-workspace`
+4. After merge: `git fetch upstream && git merge upstream/main --no-edit`
+5. Push merged main to origin: `git push origin main`
+6. Delete feature branch (local + remote)
+
+**Never push shared fixes directly to `origin/main`** — always PR through upstream first.
+
 ### Before Session End
 - ✅ Verify all changes are committed in all repos
 - ✅ Run `git status` in each repository
@@ -280,7 +292,7 @@ ai-workspace/
 │   │   │   ├── SKILL.md            # Main skill file (required)
 │   │   │   └── patterns.md         # Additional reference (optional)
 │   │   └── .installed/             # Community skills (gitignored)
-│   ├── vector-store/               # Session embeddings (legacy, now uses Qdrant)
+│   ├── visualizations/             # Dashboard HTML + data (dashboard.html)
 │   └── services/                   # Service state tracking
 ├── .mcp.json (LOCAL - gitignored)  # Your tokens - NEVER commit
 ├── .mcp.json.example               # Template for setup
@@ -444,7 +456,7 @@ This workspace includes an autonomous self-improvement loop based on ExpeL, Voya
 
 **Mode**: Configured in `scripts/self-improvement/config.json` (default: `autonomous`)
 
-**Consolidated Pipeline**: `npm run session:embed` runs the full pipeline — embedding, scoring, insight extraction, reflections, skills, reinforcement, pruning, and Qdrant rule sync. Use `--embed-only` to skip the self-improvement steps.
+**Consolidated Pipeline**: `npm run session:embed` runs the full pipeline — embedding, scoring, insight extraction, reflections, skills, reinforcement, pruning, Qdrant rule sync, and dashboard generation. Use `--embed-only` to skip the self-improvement steps.
 
 **Commands**:
 - `/improve` — Force manual insight extraction
@@ -464,50 +476,14 @@ npm run self:propose-skills  # Scan for novel skill candidates
 npm run self:prune           # Remove stale rules
 npm run self:review          # Review current state
 npm run self:apply           # Apply pending proposals
+npm run self:dashboard       # Generate unified dashboard (BI + topics)
 ```
 
-**Safety**: All changes are atomic git commits (`chore(self-improve): ...`). Revert any change with `git revert <hash>`. Max 30 active rules, 60-day staleness pruning, Claude CLI validation gate. The system cannot edit its own hooks, settings, or security config.
+**Safety**: All changes are atomic git commits (`chore(self-improve): ...`). Revert any change with `git revert <hash>`. 60-day staleness pruning, Claude CLI validation gate. Rules are stored locally in rules.json and injected contextually via hook — not committed to CLAUDE.md. The system cannot edit its own hooks, settings, or security config.
 
 ## Learned Rules
-<!-- AUTO-MANAGED by self-improvement system. Do not edit manually. -->
-<!-- Rule: zjim5wo9 | Reinforced: 0 | Last: 2026-02-03 -->
-- When debugging TypeScript type errors, read tsconfig.json first
-<!-- Rule: uvagqabv | Reinforced: 0 | Last: 2026-02-03 -->
-- Prefer for...of over .forEach() for better readability and break support
-<!-- Rule: mxvx8m2g | Reinforced: 0 | Last: 2026-02-03 -->
-- Always ensure that you understand the implications of commands like git reset and git revert before executing them.
-<!-- Rule: hucbah4s | Reinforced: 0 | Last: 2026-02-03 -->
-- Always verify completion of all required steps in a pattern before moving on to the next phase of analysis or implementation.
-<!-- Rule: gr565yqn | Reinforced: 0 | Last: 2026-02-03 -->
-- Ensure all operations align with the system's supported capabilities before execution.
-<!-- Rule: ulty507o | Reinforced: 0 | Last: 2026-02-03 -->
-- When debugging hooks, examine actual hook script content and settings configuration rather than relying on truncated or corrupted output
-<!-- Rule: mxvgwyxy | Reinforced: 0 | Last: 2026-02-03 -->
-- Verify tool output is complete and readable before drawing conclusions; base64-encoded or binary data indicates wrong file type or encoding issue
-<!-- Rule: mcg38g8x | Reinforced: 0 | Last: 2026-02-03 -->
-- Include concrete examples (regex patterns, JSON configs) alongside explanatory text to make documentation immediately usable
-<!-- Rule: ombpbsu8 | Reinforced: 0 | Last: 2026-02-03 -->
-- Configuration documentation should show complete, copy-pasteable examples with realistic option values and clear structure
-<!-- Rule: t7qaxyg3 | Reinforced: 0 | Last: 2026-02-03 -->
-- When encountering corrupted/garbled output, immediately investigate the source (encoding, hooks, plugins) rather than attempting to interpret meaningless data
-<!-- Rule: fsiyg08m | Reinforced: 0 | Last: 2026-02-03 -->
-- Ensure session chunks capture semantic meaning (what was accomplished) rather than system internals (signature hashes, hook debugging)
-<!-- Rule: 1n77h474 | Reinforced: 0 | Last: 2026-02-03 -->
-- Document command workflows with clear structure (numbered steps, categorized outputs) rather than mid-conversation context that references unclear prior state
-<!-- Rule: 71g5qbky | Reinforced: 0 | Last: 2026-02-03 -->
-- High-value chunks are self-contained with enough context to be useful standalone; low-value chunks depend on missing conversation context
-<!-- Rule: vdw30cfl | Reinforced: 0 | Last: 2026-02-03 -->
-- Session chunks should contain the distilled output/knowledge, not the raw LLM reasoning traces or cryptographic signatures from API responses
-<!-- Rule: yefa7gcu | Reinforced: 0 | Last: 2026-02-03 -->
-- When documenting systems, include purpose, configuration options, and practical use cases rather than raw data dumps
-<!-- Rule: qqm6774s | Reinforced: 0 | Last: 2026-02-03 -->
-- Successful chunks explain the "why" and "how" of system behavior (trigger conditions, input formats, file naming conventions) while failed chunks show only status output without actionable context
-<!-- Rule: ex09td3n | Reinforced: 0 | Last: 2026-02-03 -->
-- Avoid logging repetitive status checks that show no change; instead capture state transitions or meaningful events that provide debugging value
-<!-- Rule: jgxt90yw | Reinforced: 0 | Last: 2026-02-03 -->
-- When debugging container workflows, trace the full data flow architecture first (input paths, output paths, job queuing) before checking container status or logs
-<!-- Rule: 5inlxptr | Reinforced: 0 | Last: 2026-02-03 -->
-- Verify that job queuing mechanisms have actually created work items before assuming containers will process them automatically
+<!-- Rules are stored locally and injected contextually via hook. -->
+<!-- View rules: npm run self:review | Manage: npm run self:stats -->
 
 ## Before You Start
 
