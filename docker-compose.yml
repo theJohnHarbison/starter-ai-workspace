@@ -36,4 +36,4 @@ networks:
 #
 # ⚠️  IMPORTANT: Qdrant stores your session embeddings
 #     - Do NOT use 'docker-compose down' without backup
-#     - Always backup before major changes
+#     - Always backup before major changes: see backups/ directory

@@ -116,7 +116,7 @@ Respond with exactly one line: VALID or INVALID: <reason>`;
 export async function isDuplicate(ruleText: string, existingRules: Rule[], threshold: number): Promise<boolean> {
   try {
     const newEmbed = await embed(ruleText);
-    for (const rule of existingRules.filter(r => r.status === 'active')) {
+    for (const rule of existingRules.filter(r => r.status === 'active' || r.status === 'proposed')) {
       const existingEmbed = await embed(rule.text);
       const sim = cosineSimilarity(newEmbed, existingEmbed);
       if (sim > threshold) return true;
@@ -125,7 +125,7 @@ export async function isDuplicate(ruleText: string, existingRules: Rule[], thres
   } catch {
     // If embedding fails, do text-based check
     const normalizedNew = ruleText.toLowerCase().trim();
-    return existingRules.some(r => r.status === 'active' && r.text.toLowerCase().trim() === normalizedNew);
+    return existingRules.some(r => (r.status === 'active' || r.status === 'proposed') && r.text.toLowerCase().trim() === normalizedNew);
   }
 }
 
@@ -341,7 +341,26 @@ export async function applyPending(options?: { dryRun?: boolean }): Promise<void
 
   console.log(`Found ${proposed.length} pending proposal(s):\n`);
 
+  // Dedup proposals against active rules and against each other before promoting
+  const activeRules = rules.filter(r => r.status === 'active');
+  const config = loadConfig();
+  const threshold = config.deduplicationSimilarity;
+
+  // Pre-embed active rules for comparison
+  const activeEmbeddings: Array<{ text: string; embedding: number[] }> = [];
+  for (const rule of activeRules) {
+    try {
+      const emb = await embed(rule.text);
+      activeEmbeddings.push({ text: rule.text, embedding: emb });
+    } catch { /* skip */ }
+  }
+
+  // Track embeddings of proposals we've already promoted in this run
+  const promotedEmbeddings: Array<{ text: string; embedding: number[] }> = [];
+
   let applied = 0;
+  let dedupRetired = 0;
+
   for (const rule of proposed) {
     console.log(`  - "${rule.text}"`);
     if (options?.dryRun) {
@@ -349,22 +368,83 @@ export async function applyPending(options?: { dryRun?: boolean }): Promise<void
       continue;
     }
 
-    const validation = await validateRule(rule.text, rules.filter(r => r.status === 'active'));
-    if (validation.valid) {
-      rule.status = 'active';
-      rule.categories = categorizeRule(rule.text);
-      applied++;
-      console.log(`    Activated`);
-    } else {
-      console.log(`    Rejected: ${validation.reason}`);
-      rule.status = 'retired';
+    // Check if this proposal is a duplicate of an active rule or already-promoted proposal
+    let isDup = false;
+    try {
+      const ruleEmbed = await embed(rule.text);
+
+      // Check against active rules
+      for (const active of activeEmbeddings) {
+        if (cosineSimilarity(ruleEmbed, active.embedding) > threshold) {
+          isDup = true;
+          console.log(`    Retired (duplicate of active rule: "${active.text.substring(0, 50)}...")`);
+          break;
+        }
+      }
+
+      // Check against already-promoted proposals in this run
+      if (!isDup) {
+        for (const promoted of promotedEmbeddings) {
+          if (cosineSimilarity(ruleEmbed, promoted.embedding) > threshold) {
+            isDup = true;
+            console.log(`    Retired (duplicate of promoted proposal: "${promoted.text.substring(0, 50)}...")`);
+            break;
+          }
+        }
+      }
+
+      if (isDup) {
+        rule.status = 'retired';
+        dedupRetired++;
+        continue;
+      }
+
+      // Not a duplicate — validate and promote
+      const validation = await validateRule(rule.text, rules.filter(r => r.status === 'active'));
+      if (validation.valid) {
+        rule.status = 'active';
+        rule.categories = categorizeRule(rule.text);
+        promotedEmbeddings.push({ text: rule.text, embedding: ruleEmbed });
+        applied++;
+        console.log(`    Activated`);
+      } else {
+        console.log(`    Rejected: ${validation.reason}`);
+        rule.status = 'retired';
+      }
+    } catch {
+      // Embedding failed — fall back to text-based dedup
+      const normalized = rule.text.toLowerCase().trim();
+      const dupOfActive = activeRules.some(r => r.text.toLowerCase().trim() === normalized);
+      const dupOfPromoted = promotedEmbeddings.some(p => p.text.toLowerCase().trim() === normalized);
+
+      if (dupOfActive || dupOfPromoted) {
+        rule.status = 'retired';
+        dedupRetired++;
+        console.log(`    Retired (text-level duplicate)`);
+        continue;
+      }
+
+      const validation = await validateRule(rule.text, rules.filter(r => r.status === 'active'));
+      if (validation.valid) {
+        rule.status = 'active';
+        rule.categories = categorizeRule(rule.text);
+        applied++;
+        console.log(`    Activated`);
+      } else {
+        console.log(`    Rejected: ${validation.reason}`);
+        rule.status = 'retired';
+      }
     }
   }
 
-  if (!options?.dryRun && applied > 0) {
+  if (dedupRetired > 0) {
+    console.log(`\nRetired ${dedupRetired} duplicate proposal(s) during apply.`);
+  }
+
+  if (!options?.dryRun && (applied > 0 || dedupRetired > 0)) {
     saveRules(rules);
-    gitCommit(`apply ${applied} pending rule(s)`, [RULES_PATH]);
-    console.log(`\nApplied ${applied} rule(s), committed to git.`);
+    gitCommit(`apply ${applied} pending rule(s), retire ${dedupRetired} duplicate(s)`, [RULES_PATH]);
+    console.log(`Applied ${applied} rule(s), committed to git.`);
   }
 
   // Clean staged files
@@ -378,6 +458,144 @@ export async function applyPending(options?: { dryRun?: boolean }): Promise<void
         }
       } catch { /* ignore */ }
     }
+  }
+}
+
+/**
+ * Deduplicate all proposed rules: cluster by semantic similarity, keep best per cluster,
+ * and retire proposals that duplicate active rules. One-time cleanup for backlog.
+ */
+export async function deduplicateProposals(options?: { dryRun?: boolean }): Promise<void> {
+  const rules = loadRules();
+  const proposed = rules.filter(r => r.status === 'proposed');
+  const active = rules.filter(r => r.status === 'active');
+  const config = loadConfig();
+  const threshold = config.deduplicationSimilarity;
+
+  console.log(`Deduplicating proposals: ${proposed.length} proposed, ${active.length} active rules`);
+
+  if (proposed.length === 0) {
+    console.log('No proposed rules to deduplicate.');
+    return;
+  }
+
+  // Embed all proposed and active rules
+  console.log('Embedding all rules for comparison...');
+  const proposedWithEmbed: Array<{ rule: Rule; embedding: number[] | null }> = [];
+  for (const rule of proposed) {
+    try {
+      const emb = await embed(rule.text);
+      proposedWithEmbed.push({ rule, embedding: emb });
+    } catch {
+      proposedWithEmbed.push({ rule, embedding: null });
+    }
+    if (proposedWithEmbed.length % 50 === 0) {
+      process.stdout.write(`\r  Embedded ${proposedWithEmbed.length}/${proposed.length} proposed rules...`);
+    }
+  }
+  console.log(`\n  Embedded ${proposedWithEmbed.length} proposed rules.`);
+
+  const activeEmbeddings: Array<{ rule: Rule; embedding: number[] }> = [];
+  for (const rule of active) {
+    try {
+      const emb = await embed(rule.text);
+      activeEmbeddings.push({ rule, embedding: emb });
+    } catch { /* skip */ }
+  }
+  console.log(`  Embedded ${activeEmbeddings.length} active rules.`);
+
+  // Step 1: Retire proposals that are duplicates of active rules
+  let retiredVsActive = 0;
+  for (const p of proposedWithEmbed) {
+    if (p.rule.status !== 'proposed') continue;
+    if (!p.embedding) continue;
+
+    for (const a of activeEmbeddings) {
+      if (cosineSimilarity(p.embedding, a.embedding) > threshold) {
+        if (!options?.dryRun) p.rule.status = 'retired';
+        retiredVsActive++;
+        break;
+      }
+    }
+  }
+  console.log(`\nRetired ${retiredVsActive} proposals duplicating active rules.`);
+
+  // Step 2: Cluster remaining proposals and keep best per cluster
+  const remaining = proposedWithEmbed.filter(p => p.rule.status === 'proposed' && p.embedding);
+  const clustered = new Set<string>(); // rule IDs already assigned to a cluster
+  let retiredVsProposed = 0;
+
+  for (let i = 0; i < remaining.length; i++) {
+    const p = remaining[i];
+    if (clustered.has(p.rule.id)) continue;
+
+    // Find all duplicates of this rule among remaining proposals
+    const cluster: typeof remaining = [p];
+    for (let j = i + 1; j < remaining.length; j++) {
+      const q = remaining[j];
+      if (clustered.has(q.rule.id)) continue;
+      if (cosineSimilarity(p.embedding!, q.embedding!) > threshold) {
+        cluster.push(q);
+      }
+    }
+
+    if (cluster.length <= 1) continue;
+
+    // Keep the one with highest reinforcement, then oldest as tiebreaker
+    cluster.sort((a, b) => {
+      const reinforceDiff = b.rule.reinforcementCount - a.rule.reinforcementCount;
+      if (reinforceDiff !== 0) return reinforceDiff;
+      return new Date(a.rule.createdAt).getTime() - new Date(b.rule.createdAt).getTime();
+    });
+
+    // Keep first, retire rest
+    for (let k = 1; k < cluster.length; k++) {
+      if (!options?.dryRun) cluster[k].rule.status = 'retired';
+      clustered.add(cluster[k].rule.id);
+      retiredVsProposed++;
+    }
+    clustered.add(cluster[0].rule.id);
+  }
+  console.log(`Retired ${retiredVsProposed} duplicate proposals (within-proposal clusters).`);
+
+  // Also handle proposals where embedding failed — text-based dedup
+  const noEmbed = proposedWithEmbed.filter(p => p.rule.status === 'proposed' && !p.embedding);
+  const seenTexts = new Set<string>();
+
+  // Add all active rule texts
+  for (const a of active) seenTexts.add(a.text.toLowerCase().trim());
+  // Add remaining embedded proposals that survived
+  for (const p of proposedWithEmbed) {
+    if (p.rule.status === 'proposed' && p.embedding) {
+      seenTexts.add(p.rule.text.toLowerCase().trim());
+    }
+  }
+
+  let retiredTextBased = 0;
+  for (const p of noEmbed) {
+    const normalized = p.rule.text.toLowerCase().trim();
+    if (seenTexts.has(normalized)) {
+      if (!options?.dryRun) p.rule.status = 'retired';
+      retiredTextBased++;
+    } else {
+      seenTexts.add(normalized);
+    }
+  }
+  if (retiredTextBased > 0) {
+    console.log(`Retired ${retiredTextBased} proposals via text-based dedup (embedding failed).`);
+  }
+
+  const totalRetired = retiredVsActive + retiredVsProposed + retiredTextBased;
+  const remainingProposed = rules.filter(r => r.status === 'proposed').length;
+
+  console.log(`\nSummary: ${totalRetired} retired, ${remainingProposed} unique proposals remain.`);
+
+  if (!options?.dryRun && totalRetired > 0) {
+    saveRules(rules);
+    gitCommit(`deduplicate proposals: retire ${totalRetired} duplicates, ${remainingProposed} remain`, [RULES_PATH]);
+    console.log('Saved and committed.');
+  } else if (options?.dryRun) {
+    console.log('[DRY RUN] No changes saved.');
   }
 }
 
@@ -453,6 +671,10 @@ async function main(): Promise<void> {
       await syncRulesToQdrant();
       break;
 
+    case 'deduplicate':
+      await deduplicateProposals({ dryRun });
+      break;
+
     default:
       console.log('Proposal Manager');
       console.log('');
@@ -462,6 +684,8 @@ async function main(): Promise<void> {
       console.log('  apply --dry-run     Preview what would be applied');
       console.log('  add "rule text"     Add a rule directly');
       console.log('  sync                Sync all active rules to Qdrant');
+      console.log('  deduplicate         Deduplicate all proposed rules');
+      console.log('  deduplicate --dry-run  Preview dedup without saving');
       break;
   }
 }

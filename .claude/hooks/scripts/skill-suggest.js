@@ -76,6 +76,14 @@ for (const [skill, triggers] of Object.entries(SKILL_TRIGGERS)) {
 if (suggestions.length > 0 && suggestions.length <= 3) {
   // Only show suggestions if there are 1-3 matches (avoid noise)
   console.log(`\u{1F4A1} Suggested skills: ${suggestions.join(', ')}`);
+
+  // Log value event
+  try {
+    const { logValueEvent } = require('./value-logger');
+    logValueEvent('skill_suggestion', suggestions.length, {
+      skills: suggestions,
+    });
+  } catch {}
 }
 
 process.exit(0);

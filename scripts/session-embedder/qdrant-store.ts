@@ -89,6 +89,11 @@ export class QdrantVectorStore {
     }
   }
 
+  // Strip lone surrogates that break JSON serialization
+  private sanitizeText(text: string): string {
+    return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  }
+
   async addEntry(entry: VectorEntry): Promise<void> {
     await this.initialize();
 
@@ -103,6 +108,7 @@ export class QdrantVectorStore {
             payload: {
               id: entry.id,
               session_id: entry.session_id,
+              chunk_text: this.sanitizeText(entry.chunk_text),
               date: entry.metadata.date,
               chunk_index: entry.metadata.chunk_index,
             },
@@ -125,6 +131,7 @@ export class QdrantVectorStore {
       payload: {
         id: entry.id,
         session_id: entry.session_id,
+        chunk_text: this.sanitizeText(entry.chunk_text),
         date: entry.metadata.date,
         chunk_index: entry.metadata.chunk_index,
       },
@@ -140,6 +147,18 @@ export class QdrantVectorStore {
       const errorText = await response.text();
       throw new Error(`Failed to add batch: ${response.statusText} - ${errorText}`);
     }
+  }
+
+  async deleteCollection(): Promise<void> {
+    const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to delete collection: ${response.statusText}`);
+    }
+
+    this.initialized = false;
   }
 
   async search(queryEmbedding: number[], topK: number = 10): Promise<Array<VectorEntry & { score: number }>> {
@@ -164,7 +183,7 @@ export class QdrantVectorStore {
     return data.result.map((item: any) => ({
       id: item.payload.id,
       session_id: item.payload.session_id,
-      chunk_text: "", // Text is not stored in Qdrant, just ID is used for lookup
+      chunk_text: (item.payload.chunk_text as string) || "",
       embedding: item.vector || [],
       metadata: {
         date: item.payload.date,
@@ -226,28 +245,56 @@ export class QdrantVectorStore {
   }
 
   async getAllSessions(): Promise<string[]> {
+    const sessionIds = await this.getEmbeddedSessionIds();
+    return Array.from(sessionIds);
+  }
+
+  /**
+   * Fetch all embedded session IDs from Qdrant in a single scrolling pass.
+   * Returns a Set for O(1) lookup. Much faster than per-session hasSession() calls.
+   */
+  async getEmbeddedSessionIds(): Promise<Set<string>> {
     await this.initialize();
 
-    // This is an expensive operation, might need optimization for large datasets
-    const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points?limit=10000`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const sessionIds = new Set<string>();
+    let offset: string | number | null = null;
+    const PAGE_SIZE = 250;
 
-    if (!response.ok) {
-      throw new Error(`Failed to get all points: ${response.statusText}`);
+    while (true) {
+      const body: Record<string, unknown> = {
+        limit: PAGE_SIZE,
+        with_payload: { include: ['session_id'] },
+        with_vector: false,
+      };
+      if (offset !== null) {
+        body.offset = offset;
+      }
+
+      const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Scroll failed: ${response.statusText}`);
+      }
+
+      const data = await response.json() as any;
+      const points = data.result?.points || [];
+
+      for (const point of points) {
+        if (point.payload?.session_id) {
+          sessionIds.add(point.payload.session_id);
+        }
+      }
+
+      // next_page_offset is null when there are no more pages
+      offset = data.result?.next_page_offset ?? null;
+      if (offset === null || points.length === 0) break;
     }
 
-    const data = await response.json() as any;
-    const sessions = new Set<string>();
-
-    data.result.points.forEach((point: any) => {
-      if (point.payload?.session_id) {
-        sessions.add(point.payload.session_id);
-      }
-    });
-
-    return Array.from(sessions);
+    return sessionIds;
   }
 
   private stringToId(str: string): number {

@@ -1,6 +1,6 @@
 # AI Workspace
 
-An AI-assisted development workspace with semantic session memory, designed for Claude Code. This is the starter kit for your future workspace. While there are some included skills you will need to customize this workspace for your needs.
+An AI-assisted development workspace with semantic session memory, designed for Claude Code.
 
 ## Quick Setup
 
@@ -131,8 +131,8 @@ ai-workspace/
 │   ├── commands/           # Slash commands (/commit, /debug, etc.)
 │   ├── hooks/              # Code quality hooks
 │   ├── skills/             # AI skills (auto-loaded by context)
+│   ├── visualizations/     # Unified dashboard (dashboard.html)
 │   ├── logs/sessions/      # Exported session JSON files
-│   ├── visualizations/     # Generated topic map HTML
 │   └── settings.json       # Workspace settings
 ├── agent/
 │   ├── _projects/          # Project symlinks
@@ -150,40 +150,6 @@ ai-workspace/
 └── docker-compose.yml      # Qdrant service
 ```
 
-## Knowledge Graph Visualization
-
-The workspace can generate interactive visualizations of your session knowledge:
-
-### Topic Map
-
-Generates an interactive HTML word cloud showing extracted concepts, tools, and patterns from your sessions.
-
-```bash
-# Generate topic map
-npm run session:topics
-
-# Opens: .claude/visualizations/topic-map.html
-```
-
-The topic map extracts and categorizes terms by type:
-- **Tools** (blue) - Technologies like TypeScript, React, Docker
-- **Concepts** (green) - Topics like authentication, embeddings, testing
-- **Actions** (pink) - Operations like deployments, migrations, refactoring
-- **Patterns** (teal) - Recurring code identifiers (CamelCase/PascalCase)
-- **Search queries** (orange) - Frequently searched terms
-
-Click any term to see its frequency, related sessions, and context snippets. Use the filter buttons and search box to explore specific categories.
-
-### Session Visualize
-
-```bash
-npm run session:visualize
-```
-
-Generates a visualization of session embeddings and their relationships.
-
-The topic map is also automatically regenerated after each `npm run session:embed` run.
-
 ## Available npm Scripts
 
 | Script | Description |
@@ -193,8 +159,7 @@ The topic map is also automatically regenerated after each `npm run session:embe
 | `npm run hybrid:search "query"` | Semantic + entity search (recommended) |
 | `npm run tiered:search "query"` | Recency-weighted search |
 | `npm run session:stats` | Show embedding statistics |
-| `npm run session:topics` | Generate interactive topic map visualization |
-| `npm run session:visualize` | Generate session embedding visualization |
+| `npm run self:dashboard` | Generate unified dashboard (BI + topics) |
 | `npm run session:score` | Score session chunks (required for insights) |
 | `npm run self:maintenance` | Run full self-improvement cycle |
 | `npm run self:stats` | Show rule/reflection statistics |
@@ -245,6 +210,7 @@ The full pipeline is consolidated into `npm run session:embed`:
 5. **Track Skills** - Identify novel skill candidates
 6. **Reinforce/Prune** - Track rule reinforcements, prune stale rules (60-day threshold)
 7. **Sync Rules** - Sync active rules to Qdrant for semantic search
+8. **Dashboard** - Generate unified dashboard (BI metrics + knowledge map)
 
 Use `npm run session:embed -- --embed-only` to skip the self-improvement steps.
 
@@ -298,7 +264,7 @@ git revert <commit-hash>
 - Rules stored locally in `rules.json`, injected contextually via hook (not in CLAUDE.md)
 - 60-day staleness pruning
 - Cannot edit its own hooks, settings, or security config
-- Ollama validation gate for rule quality
+- Pre-filter heuristics reduce unnecessary LLM calls
 
 ## Project Management
 
@@ -354,35 +320,6 @@ To enable GitHub MCP (issues, PRs, code search):
 | `chrome-devtools` | Browser automation | No |
 
 **Important:** `.mcp.json` contains secrets and is gitignored. Never commit tokens.
-
-## Contributing
-
-The `main` branch is protected. All changes must go through pull requests.
-
-```bash
-# 1. Create a feature branch
-git checkout -b feat/your-feature
-
-# 2. Make your changes and commit
-git add .
-git commit -m "feat: description of change"
-
-# 3. Push and open a PR
-git push -u origin feat/your-feature
-gh pr create --fill
-```
-
-### Branch Naming
-
-Use prefixed branch names:
-- `feat/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation updates
-- `chore/` - Maintenance, dependency updates
-
-### Skills and Hooks
-
-If you add new skills (`.claude/skills/`) or hooks (`.claude/hooks/`), include a brief description in your PR so reviewers understand the intent.
 
 ## Configuration Files
 

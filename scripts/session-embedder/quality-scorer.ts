@@ -33,47 +33,75 @@ interface ScoringResult {
   score: number;
 }
 
-// Pre-filter heuristics for obvious cases (no LLM needed)
+// Tiered heuristic scoring — only sends likely-high-quality chunks to LLM.
+//
+// Tier 1 (score 1):  Clear noise — empty, binary, encoded content
+// Tier 2 (score 2):  Errors/stacktraces — may have minor debug value
+// Tier 3 (score 3):  Routine operations — git status, file listings, basic commands
+// Tier 4 (score 4):  Default — normal session content, not obviously valuable
+// Tier null (LLM):   Likely valuable — contains signals of insights, solutions, decisions
 function preFilterScore(chunkText: string): number | null {
-  if (!chunkText || chunkText.length < 50) return 1;
+  if (!chunkText || chunkText.length < 20) return 1;
 
   const text = chunkText.toLowerCase();
 
-  // Base64 or encoded content (long strings without spaces/newlines)
+  // --- Tier 1: Clear noise (score 1) ---
   const longUnbrokenStrings = chunkText.match(/[A-Za-z0-9+/=]{100,}/g);
   if (longUnbrokenStrings && longUnbrokenStrings.some(s => s.length > 200)) return 1;
-
-  // Binary/hex dumps
   if ((chunkText.match(/[0-9a-f]{32,}/gi) || []).length > 3) return 1;
 
-  // Pure error stacktraces
+  // --- Tier 2: Error output (score 2) ---
   if (text.includes('at object.<anonymous>') && text.includes('at module._compile')) return 2;
-  if ((text.match(/at \w+\.\w+ \(/g) || []).length > 5) return 2;
+  if ((text.match(/at \w+\.\w+ \(/g) || []).length > 8) return 2;
+  if (text.includes('npm err!') || (text.includes('errno') && text.includes('syscall'))) return 2;
+  if (chunkText.startsWith('{') && chunkText.endsWith('}') &&
+      (text.match(/"[^"]+"\s*:/g) || []).length > 30) return 2;
 
-  // Node/npm error output
-  if (text.includes('npm err!') || text.includes('errno') && text.includes('code')) return 2;
+  // --- Check for high-quality signals BEFORE assigning default ---
+  // Only send chunks to LLM that have STRONG evidence of being valuable.
+  // Require either a strong signal phrase, or 2+ weak signals together.
+  const strongSignals = [
+    // Explicit problem-solving narratives
+    /the (?:issue|problem|bug|root cause) (?:was|is|turned out)/,
+    /(?:fixed|resolved|solved) (?:by|with|using|the)/,
+    /(?:figured out|turns out|realized|discovered) (?:that|the|why|how)/,
+    // Architecture & design decisions with explanation
+    /(?:decided|chose|opted) (?:to|for) .{10,}/,
+    /design (?:decision|pattern|trade.?off)/,
+    // Learning & insights
+    /(?:lesson|takeaway|key insight|important thing)/,
+    /(?:best practice|anti.?pattern|pitfall|gotcha)/,
+    // Explanations of why/how something works
+    /(?:this works because|the reason (?:is|was)|here's (?:how|why))/,
+  ];
 
-  // Very short routine operations
-  if (chunkText.length < 100 && (
-    text.includes('git status') ||
-    text.includes('npm install') ||
-    text.includes('cd ') ||
-    text.startsWith('ls ')
+  const weakSignals = [
+    /\b(root cause|workaround|breaking change)\b/,
+    /\b(refactor|migrate|redesign)\b/,
+    /\b(optimization|performance (?:issue|improvement|fix))\b/,
+    /\b(security (?:issue|fix|vulnerability))\b/,
+    /\b(schema (?:change|migration|design))\b/,
+    /\b(algorithm|architecture)\b/,
+  ];
+
+  if (strongSignals.some(pattern => pattern.test(text))) return null; // Send to LLM
+
+  const weakMatchCount = weakSignals.filter(pattern => pattern.test(text)).length;
+  if (weakMatchCount >= 2) return null; // Multiple weak signals = likely valuable
+
+  // --- Tier 3: Routine operations (score 3) ---
+  if (chunkText.length < 150 && (
+    text.includes('git status') || text.includes('git add') || text.includes('git commit') ||
+    text.includes('npm install') || text.includes('npm run') ||
+    text.includes('cd ') || text.startsWith('ls ') || text.startsWith('$ ')
   )) return 3;
-
-  // Just file listings
   if ((text.match(/\.(ts|js|json|md|tsx|jsx)\n/g) || []).length > 10 &&
       !text.includes('function') && !text.includes('class')) return 3;
-
-  // Git diff headers without meaningful content
   if (text.includes('diff --git') && text.includes('index ') &&
       !text.includes('function') && !text.includes('class') && !text.includes('const ')) return 3;
 
-  // Pure JSON blobs (configs, package-lock, etc.)
-  if (chunkText.startsWith('{') && chunkText.endsWith('}') &&
-      (text.match(/"[^"]+"\s*:/g) || []).length > 20) return 3;
-
-  return null; // Needs LLM scoring
+  // --- Tier 4: Default — normal content, not obviously valuable (score 4) ---
+  return 4;
 }
 
 async function getPointsToScore(options: {
@@ -149,6 +177,40 @@ async function updatePointScores(updates: Array<{ id: string | number; score: nu
   }
 }
 
+async function bulkUpdateScoresByGroup(
+  items: Array<{ id: string | number; score: number }>,
+  batchSize = 500,
+): Promise<void> {
+  // Group by score so we can batch all IDs with the same score in one request
+  const byScore = new Map<number, Array<string | number>>();
+  for (const item of items) {
+    const ids = byScore.get(item.score) || [];
+    ids.push(item.id);
+    byScore.set(item.score, ids);
+  }
+
+  const scores = Array.from(byScore.keys());
+  for (const score of scores) {
+    const ids = byScore.get(score)!;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize);
+      const response = await fetch(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/payload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          points: batch,
+          payload: {
+            quality_score: score,
+            pending_score: false,
+          },
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Failed to bulk update scores: ${response.statusText}`);
+    }
+  }
+}
+
 async function markAsPending(points: QdrantPoint[]): Promise<void> {
   const ids = points.map(p => p.id);
 
@@ -210,23 +272,39 @@ JSON array of scores:`;
         }
 
         try {
-          // Parse the JSON response
-          const parsed = JSON.parse(stdout);
-          const content = parsed.result || parsed.content || parsed;
+          // Parse the Claude CLI JSON response
+          // Format: { "result": "...", "content": [...], ... } or plain text
+          let rawText = stdout;
 
-          // Extract JSON array of scores from response
-          let scoreArray: number[];
-          if (Array.isArray(content)) {
-            scoreArray = content;
-          } else if (typeof content === 'string') {
-            const match = content.match(/\[[\s\S]*?\]/);
-            if (match) {
-              scoreArray = JSON.parse(match[0]);
-            } else {
-              throw new Error('No JSON array in response');
+          // Try to extract text from JSON wrapper
+          try {
+            const parsed = JSON.parse(stdout);
+            // Claude CLI wraps response in { result: "..." } or { content: [...] }
+            if (typeof parsed.result === 'string') {
+              rawText = parsed.result;
+            } else if (typeof parsed.content === 'string') {
+              rawText = parsed.content;
+            } else if (Array.isArray(parsed.result)) {
+              rawText = JSON.stringify(parsed.result);
+            } else if (Array.isArray(parsed.content)) {
+              // content may be array of content blocks
+              rawText = parsed.content
+                .map((b: { text?: string }) => b.text || '')
+                .join('');
+            } else if (Array.isArray(parsed)) {
+              rawText = JSON.stringify(parsed);
             }
+          } catch {
+            // stdout wasn't valid JSON — use as raw text
+          }
+
+          // Extract JSON array of scores from the text
+          let scoreArray: number[];
+          const arrayMatch = rawText.match(/\[[\d\s,]+\]/);
+          if (arrayMatch) {
+            scoreArray = JSON.parse(arrayMatch[0]);
           } else {
-            throw new Error('Unexpected response format');
+            throw new Error('No JSON array in response');
           }
 
           // Map scores back to chunk IDs by index
@@ -402,11 +480,9 @@ async function main(): Promise<void> {
   console.log(`  Pre-filtered: ${preFiltered.length} chunks`);
   console.log(`  Needs LLM: ${needsLLM.length} chunks\n`);
 
-  // Update pre-filtered scores
+  // Update pre-filtered scores in bulk
   if (preFiltered.length > 0) {
-    for (const item of preFiltered) {
-      await updatePointScores([{ id: item.id, score: item.score }]);
-    }
+    await bulkUpdateScoresByGroup(preFiltered);
   }
 
   // Phase 2: Batch scoring with Claude CLI
@@ -449,4 +525,4 @@ if (require.main === module) {
   main().catch(console.error);
 }
 
-export { preFilterScore, scoreBatchWithClaude, getPointsToScore, markAsPending };
+export { preFilterScore, scoreBatchWithClaude, getPointsToScore, markAsPending, updatePointScores, bulkUpdateScoresByGroup };

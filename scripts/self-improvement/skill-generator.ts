@@ -38,6 +38,23 @@ const WORKSPACE_ROOT = findWorkspaceRoot();
 const CONFIG_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/config.json');
 const CANDIDATES_DIR = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/skill-candidates');
 const SKILLS_DIR = path.join(WORKSPACE_ROOT, '.claude/skills');
+const SKILL_STATE_PATH = path.join(WORKSPACE_ROOT, 'scripts/self-improvement/skill-state.json');
+
+interface SkillState {
+  processedSessions: Record<string, { date: string; proposed: boolean }>;
+}
+
+export function loadSkillState(): SkillState {
+  try {
+    return JSON.parse(fs.readFileSync(SKILL_STATE_PATH, 'utf8'));
+  } catch {
+    return { processedSessions: {} };
+  }
+}
+
+export function saveSkillState(state: SkillState): void {
+  fs.writeFileSync(SKILL_STATE_PATH, JSON.stringify(state, null, 2) + '\n');
+}
 
 function loadConfig(): Config {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));

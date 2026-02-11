@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { embed } from '../shared/embedder';
 import { QdrantVectorStore } from './qdrant-store';
+import { formatStaleness, deduplicateBySession, sessionDiversityCount } from './result-enhancer';
 
 /**
  * Find workspace root by looking for .claude directory
@@ -131,6 +132,35 @@ function logTieredSearch(query: string, resultsCount: number, topScore: number, 
     };
     fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
   } catch {}
+
+  // Also log value event
+  logValueEvent(query, resultsCount);
+}
+
+function logValueEvent(query: string, resultsCount: number) {
+  try {
+    const logDir = path.join(findWorkspaceRoot(), '.claude', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, 'value-events.jsonl');
+
+    let sessionId = '';
+    try {
+      const sessionFile = path.join(findWorkspaceRoot(), '.claude', 'logs', 'sessions', 'active-session.json');
+      if (fs.existsSync(sessionFile)) {
+        const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+        sessionId = data.sessionId || '';
+      }
+    } catch {}
+
+    const event = {
+      timestamp: new Date().toISOString(),
+      sessionId,
+      type: 'session_search',
+      count: resultsCount,
+      details: { source: 'tiered-search', query },
+    };
+    fs.appendFileSync(logPath, JSON.stringify(event) + '\n');
+  } catch {}
 }
 
 async function tieredSearch(query: string, options: SearchOptions): Promise<void> {
@@ -192,11 +222,11 @@ async function tieredSearch(query: string, options: SearchOptions): Promise<void
     filteredResults = filteredResults.filter(r => r.metadata.recency_score >= minRecency);
   }
 
-  // Sort by combined score
+  // Sort by combined score, deduplicate by session for diversity
   filteredResults.sort((a, b) => b.combined_score - a.combined_score);
 
-  // Take top K
-  const results = filteredResults.slice(0, options.topK);
+  // Deduplicate by session (ensures diverse results across sessions)
+  const results = deduplicateBySession(filteredResults, options.topK);
 
   logTieredSearch(
     query,
@@ -228,11 +258,13 @@ async function tieredSearch(query: string, options: SearchOptions): Promise<void
     return;
   }
 
-  console.log(`Found ${results.length} results:\n`);
+  const uniqueSessions = sessionDiversityCount(results);
+  console.log(`Found ${results.length} results from ${uniqueSessions} sessions:\n`);
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     const sessionId = result.id.split('-chunk-')[0];
+    const staleness = formatStaleness(result.metadata.date);
 
     console.log('─'.repeat(80));
     console.log(
@@ -242,7 +274,7 @@ async function tieredSearch(query: string, options: SearchOptions): Promise<void
       `Recency: ${formatScore(result.metadata.recency_score)}`
     );
     console.log(`Session: ${sessionId}`);
-    console.log(`Date: ${result.metadata.date}`);
+    console.log(`Date: ${result.metadata.date} | Age: ${staleness}`);
 
     console.log('─'.repeat(80));
 

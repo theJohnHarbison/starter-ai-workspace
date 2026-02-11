@@ -135,11 +135,9 @@ export async function pruneStaleRules(): Promise<{ pruned: number; flagged: numb
     // Remove retired rules from Qdrant
     const qdrantOk = await qdrant.isQdrantAvailable();
     if (qdrantOk) {
-      for (const id of retiredIds) {
-        try {
-          await qdrant.deleteRule(id);
-        } catch { /* ignore */ }
-      }
+      try {
+        await qdrant.deleteRulesBatch(retiredIds);
+      } catch { /* ignore */ }
     }
 
     // Git commit (only rules.json, not CLAUDE.md)

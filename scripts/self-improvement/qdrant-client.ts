@@ -282,6 +282,23 @@ export async function deleteRule(id: string): Promise<void> {
 }
 
 /**
+ * Batch delete rules from the rules collection by their string IDs.
+ */
+export async function deleteRulesBatch(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await ensureCollection(RULES_COLLECTION);
+  const numericIds = ids.map(id => stringToId(id));
+  const res = await fetch(`${QDRANT_URL}/collections/${RULES_COLLECTION}/points/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ points: numericIds }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to batch delete rules: ${res.statusText}`);
+  }
+}
+
+/**
  * Bulk upsert all rules to Qdrant (idempotent sync).
  * Processes in batches of 50 to avoid payload limits.
  */

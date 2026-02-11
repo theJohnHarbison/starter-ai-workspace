@@ -13,8 +13,6 @@
     "tiered:maintenance": "cd scripts/session-embedder && ts-node -e \"const { TieredMemoryManager } = require('./tiered-memory'); const m = new TieredMemoryManager(); console.log(m.runMaintenance());\"",
     "hybrid:search": "cd scripts/session-embedder && ts-node hybrid-search.ts",
     "hybrid:stats": "cd scripts/session-embedder && ts-node hybrid-search.ts --stats",
-    "session:visualize": "cd scripts/session-embedder && ts-node visualize.ts",
-    "session:topics": "cd scripts/session-embedder && ts-node topic-map.ts",
     "session:score": "cd scripts/session-embedder && ts-node quality-scorer.ts",
     "list-scripts": "node scripts/list-scripts",
     "hook:session-start": "node .claude/hooks/knowledge-capture/scripts/session-start.js",
@@ -26,6 +24,7 @@
     "self:propose-skills": "cd scripts/self-improvement && ts-node skill-generator.ts",
     "self:prune": "cd scripts/self-improvement && ts-node reinforcement-tracker.ts prune",
     "self:stats": "cd scripts/self-improvement && ts-node reinforcement-tracker.ts stats",
+    "self:dashboard": "cd scripts/session-embedder && ts-node dashboard-generator.ts",
     "self:maintenance": "cd scripts/self-improvement && ts-node maintenance.ts",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -47,8 +46,6 @@
     "commander": "^11.0.0",
     "fs-extra": "^11.2.0",
     "gray-matter": "^4.0.3",
-    "ollama": "^0.6.3",
-    "umap-js": "^1.4.0",
     "yaml": "^2.3.4"
   },
   "devDependencies": {

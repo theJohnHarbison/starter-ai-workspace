@@ -20,6 +20,7 @@ import * as path from 'path';
 import { embed } from '../shared/embedder';
 import { QdrantVectorStore } from './qdrant-store';
 import { EntityExtractor, Entity } from './entity-extractor';
+import { formatStaleness, deduplicateBySession, sessionDiversityCount } from './result-enhancer';
 
 export type MemoryTier = 'working' | 'episodic' | 'semantic' | 'resource';
 
@@ -229,11 +230,12 @@ export class HybridSearchEngine {
       };
     });
 
-    // Sort by hybrid score and return top K
-    return results
+    // Sort by hybrid score, deduplicate by session for diversity, return top K
+    const sorted = results
       .sort((a, b) => b.hybridScore - a.hybridScore)
-      .filter(r => !opts.minScore || r.hybridScore >= opts.minScore)
-      .slice(0, opts.topK);
+      .filter(r => !opts.minScore || r.hybridScore >= opts.minScore);
+
+    return deduplicateBySession(sorted, opts.topK);
   }
 
   /**
@@ -352,15 +354,42 @@ Examples:
     fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
   } catch {}
 
+  // Log value event
+  try {
+    const logDir = path.join(findWorkspaceRoot(), '.claude', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const valueLogPath = path.join(logDir, 'value-events.jsonl');
+
+    let sessionId = '';
+    try {
+      const sessionFile = path.join(findWorkspaceRoot(), '.claude', 'logs', 'sessions', 'active-session.json');
+      if (fs.existsSync(sessionFile)) {
+        const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+        sessionId = data.sessionId || '';
+      }
+    } catch {}
+
+    const valueEvent = {
+      timestamp: new Date().toISOString(),
+      sessionId,
+      type: 'session_search',
+      count: results.length,
+      details: { source: 'hybrid-search', query },
+    };
+    fs.appendFileSync(valueLogPath, JSON.stringify(valueEvent) + '\n');
+  } catch {}
+
   if (results.length === 0) {
     console.log('No results found.\n');
     return;
   }
 
-  console.log(`Found ${results.length} results:\n`);
+  const uniqueSessions = sessionDiversityCount(results);
+  console.log(`Found ${results.length} results from ${uniqueSessions} sessions:\n`);
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
+    const staleness = formatStaleness(r.metadata.date);
 
     console.log('─'.repeat(80));
     console.log(`#${i + 1} [${r.tier.toUpperCase()}] Hybrid: ${(r.hybridScore * 100).toFixed(1)}%`);
@@ -372,7 +401,7 @@ Examples:
     }
 
     console.log(`Session: ${r.sessionId}`);
-    console.log(`Date: ${r.metadata.date}`);
+    console.log(`Date: ${r.metadata.date} | Age: ${staleness}`);
 
     if (r.matchedEntities.length > 0) {
       console.log(`Entities: ${r.matchedEntities.join(', ')}`);

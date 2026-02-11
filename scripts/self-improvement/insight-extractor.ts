@@ -253,9 +253,22 @@ export async function extractInsights(options?: { dryRun?: boolean }): Promise<n
   const candidates = await extractRulesFromPairs(group);
   console.log(`Extracted ${candidates.length} candidate rule(s).`);
 
-  // Apply each candidate
+  // Within-batch dedup: skip duplicate candidate rules before calling addRule
+  const seenRules = new Set<string>();
+  const uniqueCandidates = candidates.filter(c => {
+    const normalized = c.text.toLowerCase().trim();
+    if (seenRules.has(normalized)) return false;
+    seenRules.add(normalized);
+    return true;
+  });
+
+  if (uniqueCandidates.length < candidates.length) {
+    console.log(`Deduplicated ${candidates.length - uniqueCandidates.length} duplicate candidate(s) within batch.`);
+  }
+
+  // Apply each unique candidate
   let applied = 0;
-  for (const candidate of candidates) {
+  for (const candidate of uniqueCandidates) {
     const result = await addRule(
       candidate.text,
       'insight-extraction',
