@@ -1109,6 +1109,16 @@ export async function generateDashboard(): Promise<string> {
 
   // Inject data into HTML dashboard so it works when opened via file:// protocol
   const htmlPath = path.join(outputDir, 'dashboard.html');
+  if (!fs.existsSync(htmlPath)) {
+    // Copy template if the dashboard HTML doesn't exist yet (fresh clone)
+    const templatePath = path.join(__dirname, 'dashboard-template.html');
+    if (fs.existsSync(templatePath)) {
+      fs.copyFileSync(templatePath, htmlPath);
+      console.log(chalk.green(`\nCreated dashboard.html from template`));
+    } else {
+      console.log(chalk.yellow('\nNo dashboard-template.html found — skipping HTML injection'));
+    }
+  }
   if (fs.existsSync(htmlPath)) {
     let html = fs.readFileSync(htmlPath, 'utf8');
     // Remove any previously injected data block
@@ -1117,7 +1127,7 @@ export async function generateDashboard(): Promise<string> {
     const dataScript = `<!--DASHBOARD_DATA_START--><script>window.DASHBOARD_DATA = ${JSON.stringify(output)};</script><!--DASHBOARD_DATA_END-->\n`;
     html = html.replace('</head>', dataScript + '</head>');
     fs.writeFileSync(htmlPath, html);
-    console.log(chalk.green(`\nData injected into: ${htmlPath}`));
+    console.log(chalk.green(`Data injected into: ${htmlPath}`));
   }
 
   console.log(chalk.green(`Dashboard data written to: ${outputPath}`));
